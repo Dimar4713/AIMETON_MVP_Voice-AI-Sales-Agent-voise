@@ -6,7 +6,8 @@ import {
 } from '@/lib/audio-queue';
 import type { AppState } from '@/hooks/use-app-state';
 
-const ELEVENLABS_SAMPLE_RATE = 16000; // ElevenLabs expects 16 kHz PCM16 mono
+/** ElevenLabs expects 16 kHz PCM16 mono audio on the inbound stream. */
+const ELEVENLABS_SAMPLE_RATE = 16000;
 
 interface ElevenLabsMessage {
   type: string;
@@ -19,23 +20,33 @@ interface ElevenLabsMessage {
 }
 
 /**
- * Owns the ElevenLabs realtime conversation: websocket lifecycle,
- * microphone capture, outbound audio streaming, and inbound audio
- * playback. All state transitions are reported through `appState`.
- *
- * IMPORTANT: ElevenLabs expects 16 kHz PCM16 mono audio.
- * We create the capture AudioContext at exactly 16000 Hz so that no
- * resampling is needed — sending at the system rate (44100 / 48000 Hz)
- * causes the agent to hear garbled high-pitched audio and not understand
- * the user.
+ * Linear-interpolation downsampler: float32 @ srcRate → Int16 @ 16 kHz.
+ * Runs at the system's native AudioContext rate so getUserMedia never fails.
  */
+function downsampleToInt16(input: Float32Array, srcRate: number): Int16Array {
+  const ratio = srcRate / ELEVENLABS_SAMPLE_RATE;
+  const outputLength = Math.round(input.length / ratio);
+  const output = new Int16Array(outputLength);
+  for (let i = 0; i < outputLength; i++) {
+    const srcIdx = i * ratio;
+    const lo = Math.floor(srcIdx);
+    const hi = Math.min(lo + 1, input.length - 1);
+    const frac = srcIdx - lo;
+    const sample = input[lo] * (1 - frac) + input[hi] * frac;
+    const clamped = Math.max(-1, Math.min(1, sample));
+    output[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+  }
+  return output;
+}
+
 export function useConversation(appState: AppState) {
   const { addLog, setCallStatus, setMicLevel } = appState;
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const playbackCtxRef = useRef<AudioContext | null>(null);
+  // One shared AudioContext for both capture and playback — this guarantees
+  // the playback context is always running when the microphone graph is active.
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioPlaybackQueue | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -55,14 +66,12 @@ export function useConversation(appState: AppState) {
       const data = new Uint8Array(analyser.frequencyBinCount);
       const tick = () => {
         analyser.getByteTimeDomainData(data);
-        // RMS of the time-domain samples, mapped to 0-100
         let sum = 0;
         for (let i = 0; i < data.length; i++) {
           const s = (data[i] - 128) / 128;
           sum += s * s;
         }
-        const rms = Math.sqrt(sum / data.length);
-        setMicLevel(Math.min(100, Math.round(rms * 300)));
+        setMicLevel(Math.min(100, Math.round(Math.sqrt(sum / data.length) * 300)));
         levelRafRef.current = requestAnimationFrame(tick);
       };
       levelRafRef.current = requestAnimationFrame(tick);
@@ -73,41 +82,25 @@ export function useConversation(appState: AppState) {
   const cleanup = useCallback(() => {
     stopLevelMeter();
 
-    try {
-      processorRef.current?.disconnect();
-    } catch {
-      /* noop */
-    }
-    try {
-      analyserRef.current?.disconnect();
-    } catch {
-      /* noop */
-    }
-    try {
-      sourceRef.current?.disconnect();
-    } catch {
-      /* noop */
-    }
+    try { processorRef.current?.disconnect(); } catch { /* noop */ }
+    try { analyserRef.current?.disconnect(); } catch { /* noop */ }
+    try { sourceRef.current?.disconnect(); } catch { /* noop */ }
     processorRef.current = null;
     analyserRef.current = null;
     sourceRef.current = null;
 
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
     }
 
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => undefined);
-    }
-    audioContextRef.current = null;
-
     playbackQueueRef.current?.clear();
-    if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
-      playbackCtxRef.current.close().catch(() => undefined);
-    }
-    playbackCtxRef.current = null;
     playbackQueueRef.current = null;
+
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      audioCtxRef.current.close().catch(() => undefined);
+    }
+    audioCtxRef.current = null;
 
     if (wsRef.current) {
       wsRef.current.onmessage = null;
@@ -126,19 +119,13 @@ export function useConversation(appState: AppState) {
   const handleServerMessage = useCallback(
     async (raw: string) => {
       let msg: ElevenLabsMessage;
-      try {
-        msg = JSON.parse(raw);
-      } catch {
-        return;
-      }
+      try { msg = JSON.parse(raw); } catch { return; }
 
       switch (msg.type) {
         case 'ping': {
           const eventId = msg.ping_event?.event_id;
           if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({ type: 'pong', event_id: eventId }),
-            );
+            wsRef.current.send(JSON.stringify({ type: 'pong', event_id: eventId }));
           }
           break;
         }
@@ -153,29 +140,40 @@ export function useConversation(appState: AppState) {
           break;
         }
         case 'agent_response_correction': {
-          const text =
-            msg.agent_response_correction_event?.corrected_agent_response;
+          const text = msg.agent_response_correction_event?.corrected_agent_response;
           if (text) addLog('info', `Агент (исправлено): ${text}`);
           break;
         }
         case 'audio': {
           const b64 = msg.audio_event?.audio_base_64;
-          if (b64 && playbackCtxRef.current && playbackQueueRef.current) {
-            try {
-              const buffer = await decodeBase64Pcm16(
-                playbackCtxRef.current,
-                b64,
-              );
-              playbackQueueRef.current.enqueue(buffer);
-            } catch {
-              addLog('error', 'Не удалось декодировать аудиофрагмент');
+          if (!b64) break;
+
+          const ctx = audioCtxRef.current;
+          const queue = playbackQueueRef.current;
+
+          if (!ctx || !queue) {
+            addLog('warn', '⚠ Аудио от агента — контекст не готов');
+            break;
+          }
+
+          addLog('info', `🔊 Аудио (${b64.length} байт) — ctx: ${ctx.state}`);
+
+          try {
+            if (ctx.state === 'suspended') {
+              await ctx.resume();
+              addLog('warn', `AudioContext возобновлён: ${ctx.state}`);
             }
+            const buffer = await decodeBase64Pcm16(ctx, b64);
+            addLog('info', `✓ ${buffer.length} сэмплов @ ${buffer.sampleRate} Гц`);
+            queue.enqueue(buffer);
+          } catch (err) {
+            addLog('error', `Ошибка декодирования аудио: ${err instanceof Error ? err.message : String(err)}`);
           }
           break;
         }
         case 'interruption': {
           playbackQueueRef.current?.clear();
-          addLog('warn', 'Разговор прерван — очередь воспроизведения очищена');
+          addLog('warn', 'Агент прерван — очередь воспроизведения очищена');
           break;
         }
         default:
@@ -194,7 +192,6 @@ export function useConversation(appState: AppState) {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            sampleRate: ELEVENLABS_SAMPLE_RATE,
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
@@ -208,69 +205,63 @@ export function useConversation(appState: AppState) {
 
         const AudioContextCtor =
           window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext })
-            .webkitAudioContext;
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        // CRITICAL: create the capture context at exactly 16000 Hz.
-        // If the context runs at the system default (44100/48000 Hz), the
-        // ScriptProcessor produces samples at that rate and ElevenLabs receives
-        // audio that is 2.75–3× too fast / high-pitched and cannot transcribe it.
-        const audioContext = new AudioContextCtor({
-          sampleRate: ELEVENLABS_SAMPLE_RATE,
+        // Single shared AudioContext for capture + playback.
+        // System-native sample rate (44100/48000 Hz) — universally supported.
+        // We downsample to 16 kHz manually when sending; the browser resamples
+        // our 16 kHz playback buffers automatically on output.
+        const audioCtx = new AudioContextCtor();
+        audioCtxRef.current = audioCtx;
+        addLog('info', `AudioContext: ${audioCtx.sampleRate} Гц, состояние: ${audioCtx.state}`);
+
+        // Resume if needed (Chrome autoplay policy)
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+          addLog('info', `AudioContext возобновлён: ${audioCtx.state}`);
+        }
+
+        playbackQueueRef.current = new AudioPlaybackQueue(audioCtx, (errMsg) => {
+          addLog('error', `Ошибка воспроизведения: ${errMsg}`);
         });
-        audioContextRef.current = audioContext;
-
-        // Playback context can run at any rate; we decode PCM16 at 16 kHz
-        // inside decodeBase64Pcm16 and the browser resamples on playback.
-        const playbackCtx = new AudioContextCtor();
-        playbackCtxRef.current = playbackCtx;
-        playbackQueueRef.current = new AudioPlaybackQueue(playbackCtx);
 
         const ws = new WebSocket(signedUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
           setCallStatus('active');
-          addLog(
-            'info',
-            `Соединение установлено — разговор активен (${ELEVENLABS_SAMPLE_RATE} Гц, PCM16)`,
-          );
+          addLog('info', 'Соединение установлено — разговор активен');
 
-          const source = audioContext.createMediaStreamSource(stream);
+          const source = audioCtx.createMediaStreamSource(stream);
           sourceRef.current = source;
 
-          // Analyser for the live mic-level meter (does not affect the signal)
-          const analyser = audioContext.createAnalyser();
+          // Analyser for VU meter (read-only tap, does not affect signal path)
+          const analyser = audioCtx.createAnalyser();
           analyser.fftSize = 256;
           analyserRef.current = analyser;
           source.connect(analyser);
           startLevelMeter(analyser);
 
-          // ScriptProcessor: forward PCM16 chunks to ElevenLabs
-          const processor = audioContext.createScriptProcessor(4096, 1, 1);
+          // ScriptProcessor: downsample from native rate → 16 kHz, forward to ElevenLabs
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
           processorRef.current = processor;
+          const captureRate = audioCtx.sampleRate;
 
           processor.onaudioprocess = (event) => {
             if (ws.readyState !== WebSocket.OPEN) return;
             const input = event.inputBuffer.getChannelData(0);
-            // Convert float32 samples [-1, 1] → Int16
-            const pcm16 = new Int16Array(input.length);
-            for (let i = 0; i < input.length; i++) {
-              const s = Math.max(-1, Math.min(1, input[i]));
-              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-            }
-            const base64 = arrayBufferToBase64(pcm16.buffer);
-            ws.send(JSON.stringify({ user_audio_chunk: base64 }));
+            const pcm16 = downsampleToInt16(input, captureRate);
+            ws.send(JSON.stringify({ user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer) }));
           };
 
+          // Connect capture graph: source → analyser → processor.
+          // Processor must be connected to destination to stay active.
           analyser.connect(processor);
-          processor.connect(audioContext.destination);
+          processor.connect(audioCtx.destination);
         };
 
         ws.onmessage = (event) => {
-          if (typeof event.data === 'string') {
-            handleServerMessage(event.data);
-          }
+          if (typeof event.data === 'string') handleServerMessage(event.data);
         };
 
         ws.onerror = () => {
@@ -283,8 +274,7 @@ export function useConversation(appState: AppState) {
           cleanup();
         };
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Неизвестная ошибка';
+        const message = err instanceof Error ? err.message : 'Неизвестная ошибка';
         addLog('error', `Не удалось начать звонок: ${message}`);
         setCallStatus('idle');
         cleanup();

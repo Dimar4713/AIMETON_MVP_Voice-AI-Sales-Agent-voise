@@ -9,9 +9,11 @@ export class AudioPlaybackQueue {
   private queue: AudioBuffer[] = [];
   private isPlaying = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  private onError?: (msg: string) => void;
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: AudioContext, onError?: (msg: string) => void) {
     this.ctx = ctx;
+    this.onError = onError;
   }
 
   enqueue(buffer: AudioBuffer) {
@@ -29,17 +31,38 @@ export class AudioPlaybackQueue {
       return;
     }
     this.isPlaying = true;
-    const source = this.ctx.createBufferSource();
-    source.buffer = next;
-    source.connect(this.ctx.destination);
-    source.onended = () => {
-      if (this.currentSource === source) {
-        this.currentSource = null;
-      }
+
+    // If the context got suspended between chunks, resume it now
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().then(() => this.playBuffer(next)).catch((e) => {
+        this.onError?.(`resume failed: ${e}`);
+        this.isPlaying = false;
+      });
+      return;
+    }
+
+    this.playBuffer(next);
+  }
+
+  private playBuffer(buffer: AudioBuffer) {
+    try {
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.ctx.destination);
+      source.onended = () => {
+        if (this.currentSource === source) {
+          this.currentSource = null;
+        }
+        this.playNext();
+      };
+      this.currentSource = source;
+      source.start();
+    } catch (e) {
+      this.onError?.(`playBuffer error: ${e}`);
+      this.isPlaying = false;
+      // Try next chunk anyway
       this.playNext();
-    };
-    this.currentSource = source;
-    source.start();
+    }
   }
 
   /** Stop any current playback and drop all queued chunks (interruption). */

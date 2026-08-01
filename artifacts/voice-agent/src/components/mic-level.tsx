@@ -98,7 +98,8 @@ export function MicTestPanel() {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
-      const ctx = new AudioContextCtor({ sampleRate: 16000 });
+      // Use the system's native rate — forcing 16 kHz is unreliable across browsers
+      const ctx = new AudioContextCtor();
       ctxRef.current = ctx;
 
       const source = ctx.createMediaStreamSource(stream);
