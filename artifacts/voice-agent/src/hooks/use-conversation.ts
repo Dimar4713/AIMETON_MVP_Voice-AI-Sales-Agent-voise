@@ -208,13 +208,13 @@ export function useConversation(appState: AppState) {
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            channelCount: 1,
-            // Keep the capture signal raw. Browser echo cancellation can
-            // mistake the agent's playback for echo and suppress the user's
-            // voice completely in a single-context voice call.
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: ELEVENLABS_SAMPLE_RATE },
+            // Keep echo cancellation off so the browser cannot suppress the
+            // user's voice while the agent is speaking.
             echoCancellation: false,
             noiseSuppression: false,
-            autoGainControl: false,
+            autoGainControl: true,
           },
         });
         mediaStreamRef.current = stream;
@@ -235,10 +235,19 @@ export function useConversation(appState: AppState) {
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        // Force 48 kHz — the universally supported standard rate.
-        // Without this, Chrome may create a 16 kHz context on hardware that
-        // reports 16 kHz as native, causing poor resampling of mic audio.
-        const audioCtx = new AudioContextCtor({ sampleRate: 48000 });
+        // Match the audio context to the actual microphone rate. This browser
+        // provides the selected microphone at 16 kHz, which is also the
+        // format ElevenLabs expects for user input.
+        const requestedRate =
+          trackSettings?.sampleRate && trackSettings.sampleRate >= 8000
+            ? trackSettings.sampleRate
+            : ELEVENLABS_SAMPLE_RATE;
+        let audioCtx: AudioContext;
+        try {
+          audioCtx = new AudioContextCtor({ sampleRate: requestedRate });
+        } catch {
+          audioCtx = new AudioContextCtor();
+        }
         audioCtxRef.current = audioCtx;
         const captureRate = audioCtx.sampleRate;
 
@@ -329,6 +338,7 @@ export function useConversation(appState: AppState) {
             let workletMsgCount = 0;
             let chunksSent = 0;
             let signalLogged = false;
+            let nonSilentLogged = false;
 
             workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
               workletMsgCount++;
@@ -365,6 +375,11 @@ export function useConversation(appState: AppState) {
                     `Микрофонный PCM: RMS ${rms.toFixed(5)}, пик ${peak.toFixed(5)}${peak < 0.001 ? ' — сигнал почти нулевой' : ''}`,
                   );
                 }
+                if (!nonSilentLogged && peak >= 0.005) {
+                  nonSilentLogged = true;
+                  const rms = Math.sqrt(sumSquares / Math.max(1, merged.length));
+                  addLog('info', `✓ Голосовой сигнал обнаружен: RMS ${rms.toFixed(5)}, пик ${peak.toFixed(5)}`);
+                }
 
                 const pcm16 = downsampleToInt16(merged, captureRate);
                 ws.send(JSON.stringify({
@@ -384,10 +399,10 @@ export function useConversation(appState: AppState) {
               addLog('error', `Ошибка порта воркрлета: ${String(e)}`);
             };
 
-            // Send the raw source directly to the worklet. The analyser is a
-            // separate read-only tap for the VU meter and must not sit in the
-            // microphone path sent to ElevenLabs.
-            source.connect(workletNode);
+            // Match the official ElevenLabs input graph:
+            // source → analyser → worklet. Analyser is transparent and also
+            // powers the live VU meter.
+            analyser.connect(workletNode);
             // Connect output to a silent sink so Chrome treats the graph as active
             const sink = audioCtx.createGain();
             sink.gain.value = 0;

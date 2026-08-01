@@ -162,9 +162,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:h-0 lg:grid-cols-[1.15fr_0.85fr]">
           {/* Main action column */}
-          <div className="min-h-0 overflow-y-auto pr-1">
+          <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
             <div className="flex flex-col gap-6">
             <div className="relative overflow-hidden rounded-xl border border-card-border bg-card/60 p-6 backdrop-blur-sm sm:p-8">
               <div className="mb-6 flex items-center justify-between">
@@ -330,7 +330,7 @@ export default function Dashboard() {
           </div>
 
           {/* Right column: mic test + logs */}
-          <div className="flex min-h-[420px] min-w-0 flex-col gap-6 lg:min-h-0">
+          <div className="flex min-h-[420px] min-w-0 flex-col gap-6 lg:h-full lg:min-h-0">
             <MicTestPanel />
             <div className="min-h-0 flex-1">
               <LogsPanel logs={logs} />

@@ -31,11 +31,14 @@ interface LogsPanelProps {
 /** Scrolling event log — mission-control terminal feel, newest at bottom. */
 export function LogsPanel({ logs }: LogsPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldFollowTailRef = useRef(true);
 
   useEffect(() => {
     const container = scrollRef.current;
-    if (container) {
-      container.scrollTop = container.scrollHeight;
+    if (container && shouldFollowTailRef.current) {
+      // Keep the page layout completely independent from log growth.
+      // Only this inner terminal is allowed to move.
+      container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
     }
   }, [logs.length]);
 
@@ -57,6 +60,12 @@ export function LogsPanel({ logs }: LogsPanelProps) {
       </div>
       <div
         ref={scrollRef}
+        onScroll={(event) => {
+          const container = event.currentTarget;
+          const distanceFromBottom =
+            container.scrollHeight - container.scrollTop - container.clientHeight;
+          shouldFollowTailRef.current = distanceFromBottom <= 24;
+        }}
         className="logs-scroll min-h-0 flex-1 overflow-y-scroll overscroll-contain px-4 py-3"
         data-testid="panel-logs"
       >
@@ -75,7 +84,7 @@ export function LogsPanel({ logs }: LogsPanelProps) {
               return (
                 <li
                   key={log.id}
-                  className="animate-soft-rise flex items-start gap-2.5 rounded-md px-2 py-1.5 font-mono text-[12.5px] leading-relaxed hover-elevate"
+                  className="flex items-start gap-2.5 rounded-md px-2 py-1.5 font-mono text-[12.5px] leading-relaxed hover-elevate"
                   data-testid={`row-log-${log.id}`}
                 >
                   <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', config.color)} />

@@ -388,6 +388,11 @@
 .logs-scroll {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--primary) / 0.7) hsl(var(--muted) / 0.45);
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  contain: strict;
+  scrollbar-gutter: stable both-edges;
+  isolation: isolate;
 }
 
 .logs-scroll::-webkit-scrollbar {
