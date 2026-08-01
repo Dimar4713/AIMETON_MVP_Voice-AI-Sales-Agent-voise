@@ -307,10 +307,15 @@ export function useConversation(appState: AppState) {
         };
 
         ws.onclose = (event) => {
-          addLog(
-            'warn',
-            `Соединение с ElevenLabs закрыто (код ${event.code}, ${event.wasClean ? 'чисто' : 'аварийно'}${event.reason ? `: ${event.reason}` : ''})`,
-          );
+          const closeDetails = `код ${event.code}, ${event.wasClean ? 'чисто' : 'аварийно'}${event.reason ? `: ${event.reason}` : ''}`;
+          if (/quota limit|quota exceeded|exceeds your quota/i.test(event.reason)) {
+            addLog(
+              'error',
+              `Квота ElevenLabs исчерпана — звонок остановлен. Проверьте лимит или тариф ElevenLabs. (${closeDetails})`,
+            );
+          } else {
+            addLog('warn', `Соединение с ElevenLabs закрыто (${closeDetails})`);
+          }
           setCallStatus('idle');
           cleanup();
         };
