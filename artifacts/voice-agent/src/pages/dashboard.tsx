@@ -121,11 +121,11 @@ export default function Dashboard() {
   const callMeta = callStatusMeta[callStatus];
 
   return (
-    <div className="min-h-[100dvh] w-full bg-background">
+    <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-background">
       <div className="pointer-events-none fixed inset-0 opacity-[0.03] mix-blend-overlay" />
 
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
+      <header className="z-30 shrink-0 border-b border-border bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary-border bg-primary/15">
@@ -151,7 +151,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:overflow-hidden">
         {showWelcome && (
           <div className="mb-6">
             <WelcomeBlock
@@ -162,9 +162,10 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           {/* Main action column */}
-          <div className="flex flex-col gap-6">
+          <div className="min-h-0 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-6">
             <div className="relative overflow-hidden rounded-xl border border-card-border bg-card/60 p-6 backdrop-blur-sm sm:p-8">
               <div className="mb-6 flex items-center justify-between">
                 <div>
@@ -325,12 +326,13 @@ export default function Dashboard() {
                 />
               </div>
             </div>
+            </div>
           </div>
 
           {/* Right column: mic test + logs */}
-          <div className="flex min-h-[420px] flex-col gap-6 lg:min-h-0">
+          <div className="flex min-h-[420px] min-w-0 flex-col gap-6 lg:min-h-0">
             <MicTestPanel />
-            <div className="flex-1">
+            <div className="min-h-0 flex-1">
               <LogsPanel logs={logs} />
             </div>
           </div>

@@ -10,10 +10,20 @@ export class AudioPlaybackQueue {
   private isPlaying = false;
   private currentSource: AudioBufferSourceNode | null = null;
   private onError?: (msg: string) => void;
+  private onPlay?: (buffer: AudioBuffer) => void;
+  private outputGain: GainNode;
 
-  constructor(ctx: AudioContext, onError?: (msg: string) => void) {
+  constructor(
+    ctx: AudioContext,
+    onError?: (msg: string) => void,
+    onPlay?: (buffer: AudioBuffer) => void,
+  ) {
     this.ctx = ctx;
     this.onError = onError;
+    this.onPlay = onPlay;
+    this.outputGain = ctx.createGain();
+    this.outputGain.gain.value = 1;
+    this.outputGain.connect(ctx.destination);
   }
 
   enqueue(buffer: AudioBuffer) {
@@ -48,7 +58,7 @@ export class AudioPlaybackQueue {
     try {
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(this.ctx.destination);
+      source.connect(this.outputGain);
       source.onended = () => {
         if (this.currentSource === source) {
           this.currentSource = null;
@@ -56,6 +66,7 @@ export class AudioPlaybackQueue {
         this.playNext();
       };
       this.currentSource = source;
+      this.onPlay?.(buffer);
       source.start();
     } catch (e) {
       this.onError?.(`playBuffer error: ${e}`);
@@ -78,6 +89,15 @@ export class AudioPlaybackQueue {
       this.currentSource = null;
     }
     this.isPlaying = false;
+  }
+
+  dispose() {
+    this.clear();
+    try {
+      this.outputGain.disconnect();
+    } catch {
+      // Already disconnected.
+    }
   }
 }
 

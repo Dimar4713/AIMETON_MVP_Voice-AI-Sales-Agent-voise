@@ -52,6 +52,7 @@ export function useConversation(appState: AppState) {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioPlaybackQueue | null>(null);
+  const audioEventCountRef = useRef(0);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -104,8 +105,9 @@ export function useConversation(appState: AppState) {
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     mediaStreamRef.current = null;
 
-    playbackQueueRef.current?.clear();
+    playbackQueueRef.current?.dispose();
     playbackQueueRef.current = null;
+    audioEventCountRef.current = 0;
 
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close().catch(() => undefined);
@@ -130,6 +132,10 @@ export function useConversation(appState: AppState) {
     async (raw: string) => {
       let msg: ElevenLabsMessage;
       try { msg = JSON.parse(raw); } catch { return; }
+
+      if (audioEventCountRef.current < 3 && msg.type !== 'ping') {
+        addLog('info', `Событие ElevenLabs: ${msg.type}`);
+      }
 
       switch (msg.type) {
         case 'ping': {
@@ -156,13 +162,26 @@ export function useConversation(appState: AppState) {
         }
         case 'audio': {
           const b64 = msg.audio_event?.audio_base_64;
-          if (!b64) break;
+          if (!b64) {
+            addLog('warn', 'Событие audio пришло без audio_base_64');
+            break;
+          }
           const ctx = audioCtxRef.current;
           const queue = playbackQueueRef.current;
           if (!ctx || !queue) break;
           try {
+            const audioEventNumber = audioEventCountRef.current + 1;
+            audioEventCountRef.current = audioEventNumber;
+            if (audioEventNumber === 1) {
+              addLog('info', `✓ Получен первый аудиофрейм агента (${b64.length} base64-символов)`);
+            } else if (audioEventNumber % 50 === 0) {
+              addLog('info', `🔊 Получено аудиофреймов агента: ${audioEventNumber}`);
+            }
             if (ctx.state === 'suspended') await ctx.resume();
             const buffer = await decodeBase64Pcm16(ctx, b64);
+            if (audioEventNumber === 1) {
+              addLog('info', `✓ Аудиофрейм декодирован: ${buffer.length} сэмплов, ${buffer.duration.toFixed(3)} с`);
+            }
             queue.enqueue(buffer);
           } catch (err) {
             addLog('error', `Ошибка воспроизведения: ${err instanceof Error ? err.message : String(err)}`);
@@ -190,13 +209,24 @@ export function useConversation(appState: AppState) {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            // Keep the capture signal raw. Browser echo cancellation can
+            // mistake the agent's playback for echo and suppress the user's
+            // voice completely in a single-context voice call.
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
           },
         });
         mediaStreamRef.current = stream;
-        addLog('info', 'Доступ к микрофону получен');
+        const track = stream.getAudioTracks()[0];
+        const trackSettings = track?.getSettings();
+        addLog(
+          'info',
+          `Доступ к микрофону получен (${trackSettings?.sampleRate ?? '?'} Гц, ${trackSettings?.channelCount ?? '?'} канал, ${track?.muted ? 'заглушен' : 'активен'})`,
+        );
+        if (!track || track.readyState !== 'live' || track.muted) {
+          throw new Error('Браузер не передаёт аудиосигнал: микрофон заглушен или остановлен');
+        }
 
         setCallStatus('connecting');
         addLog('info', 'Устанавливаем соединение с ElevenLabs...');
@@ -229,9 +259,22 @@ export function useConversation(appState: AppState) {
         keepAliveRef.current = keepAlive;
 
         // ── Playback queue ────────────────────────────────────────────────────
-        playbackQueueRef.current = new AudioPlaybackQueue(audioCtx, (errMsg) => {
-          addLog('error', `Ошибка воспроизведения: ${errMsg}`);
-        });
+        let playbackStarted = false;
+        playbackQueueRef.current = new AudioPlaybackQueue(
+          audioCtx,
+          (errMsg) => {
+            addLog('error', `Ошибка воспроизведения: ${errMsg}`);
+          },
+          (buffer) => {
+            if (!playbackStarted) {
+              playbackStarted = true;
+              addLog(
+                'info',
+                `✓ Динамик запущен: ${buffer.length} сэмплов, ${buffer.duration.toFixed(3)} с, состояние AudioContext: ${audioCtx.state}`,
+              );
+            }
+          },
+        );
 
         // ── Load AudioWorklet module ──────────────────────────────────────────
         // BASE_URL includes trailing slash, e.g. "/" or "/voice-agent/"
@@ -245,6 +288,18 @@ export function useConversation(appState: AppState) {
 
         ws.onopen = async () => {
           try {
+            // ElevenLabs requires this client-data handshake before it starts
+            // consuming user audio. The official SDK sends it before calling
+            // its audio interface; without it the agent can still play the
+            // configured first message but may ignore microphone chunks.
+            ws.send(JSON.stringify({
+              type: 'conversation_initiation_client_data',
+              custom_llm_extra_body: {},
+              conversation_config_override: {},
+              dynamic_variables: {},
+            }));
+            addLog('info', 'Handshake ElevenLabs отправлен — включаем микрофонный поток');
+
             setCallStatus('active');
             addLog('info', 'Соединение установлено — разговор активен');
 
@@ -273,6 +328,7 @@ export function useConversation(appState: AppState) {
             let accumSize = 0;
             let workletMsgCount = 0;
             let chunksSent = 0;
+            let signalLogged = false;
 
             workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
               workletMsgCount++;
@@ -294,6 +350,22 @@ export function useConversation(appState: AppState) {
                 accumBuf = [];
                 accumSize = 0;
 
+                let sumSquares = 0;
+                let peak = 0;
+                for (let i = 0; i < merged.length; i++) {
+                  const sample = merged[i];
+                  sumSquares += sample * sample;
+                  peak = Math.max(peak, Math.abs(sample));
+                }
+                if (!signalLogged) {
+                  signalLogged = true;
+                  const rms = Math.sqrt(sumSquares / Math.max(1, merged.length));
+                  addLog(
+                    'info',
+                    `Микрофонный PCM: RMS ${rms.toFixed(5)}, пик ${peak.toFixed(5)}${peak < 0.001 ? ' — сигнал почти нулевой' : ''}`,
+                  );
+                }
+
                 const pcm16 = downsampleToInt16(merged, captureRate);
                 ws.send(JSON.stringify({
                   user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
@@ -312,8 +384,10 @@ export function useConversation(appState: AppState) {
               addLog('error', `Ошибка порта воркрлета: ${String(e)}`);
             };
 
-            // source → analyser → workletNode (processes audio; output discarded)
-            analyser.connect(workletNode);
+            // Send the raw source directly to the worklet. The analyser is a
+            // separate read-only tap for the VU meter and must not sit in the
+            // microphone path sent to ElevenLabs.
+            source.connect(workletNode);
             // Connect output to a silent sink so Chrome treats the graph as active
             const sink = audioCtx.createGain();
             sink.gain.value = 0;
@@ -330,7 +404,11 @@ export function useConversation(appState: AppState) {
         };
 
         ws.onmessage = (event) => {
-          if (typeof event.data === 'string') handleServerMessage(event.data);
+          if (typeof event.data === 'string') {
+            handleServerMessage(event.data);
+          } else {
+            addLog('warn', `Получено нестроковое WebSocket-событие: ${typeof event.data}`);
+          }
         };
 
         ws.onerror = () => {

@@ -30,14 +30,17 @@ interface LogsPanelProps {
 
 /** Scrolling event log — mission-control terminal feel, newest at bottom. */
 export function LogsPanel({ logs }: LogsPanelProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const container = scrollRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [logs.length]);
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-card-border bg-card/60 backdrop-blur-sm">
+    <div className="flex h-full min-h-0 flex-col rounded-xl border border-card-border bg-card/60 backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-card-border px-4 py-3">
         <div className="flex items-center gap-2">
           <TerminalSquare className="h-4 w-4 text-muted-foreground" />
@@ -53,7 +56,8 @@ export function LogsPanel({ logs }: LogsPanelProps) {
         </span>
       </div>
       <div
-        className="logs-scroll flex-1 overflow-y-auto px-4 py-3"
+        ref={scrollRef}
+        className="logs-scroll min-h-0 flex-1 overflow-y-scroll overscroll-contain px-4 py-3"
         data-testid="panel-logs"
       >
         {logs.length === 0 ? (
@@ -89,7 +93,6 @@ export function LogsPanel({ logs }: LogsPanelProps) {
             })}
           </ul>
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
