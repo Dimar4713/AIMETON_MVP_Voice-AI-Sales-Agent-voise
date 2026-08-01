@@ -11,6 +11,11 @@ const ELEVENLABS_SAMPLE_RATE = 16000;
 
 interface ElevenLabsMessage {
   type: string;
+  error_event?: {
+    code?: number;
+    error_name?: string;
+    message?: string;
+  };
   user_transcription_event?: { user_transcript?: string };
   agent_response_event?: { agent_response?: string };
   agent_response_correction_event?: { corrected_agent_response?: string };
@@ -122,6 +127,14 @@ export function useConversation(appState: AppState) {
       try { msg = JSON.parse(raw); } catch { return; }
 
       switch (msg.type) {
+        case 'client_error': {
+          const error = msg.error_event;
+          addLog(
+            'error',
+            `Ошибка ElevenLabs: ${error?.error_name ?? 'client_error'}${error?.code ? ` (${error.code})` : ''}${error?.message ? ` — ${error.message}` : ''}`,
+          );
+          break;
+        }
         case 'ping': {
           const eventId = msg.ping_event?.event_id;
           if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -311,7 +324,7 @@ export function useConversation(appState: AppState) {
           if (/quota limit|quota exceeded|exceeds your quota/i.test(event.reason)) {
             addLog(
               'error',
-              `Квота ElevenLabs исчерпана — звонок остановлен. Проверьте лимит или тариф ElevenLabs. (${closeDetails})`,
+              `ElevenLabs отклонил ConvAI-сессию по лимиту запроса или workspace. Это не обязательно означает нулевой баланс кредитов; проверьте лимиты ElevenAgents и параллельные разговоры. (${closeDetails})`,
             );
           } else {
             addLog('warn', `Соединение с ElevenLabs закрыто (${closeDetails})`);
