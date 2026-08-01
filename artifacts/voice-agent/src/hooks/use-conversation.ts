@@ -9,13 +9,6 @@ import type { AppState } from '@/hooks/use-app-state';
 /** ElevenLabs expects 16 kHz PCM16 mono audio on the inbound stream. */
 const ELEVENLABS_SAMPLE_RATE = 16000;
 
-/**
- * Target chunk duration sent to ElevenLabs, in milliseconds.
- * The actual sample count threshold is derived from the context's sample rate
- * so chunks are consistently ~100 ms regardless of AudioContext rate.
- */
-const CHUNK_DURATION_MS = 100;
-
 interface ElevenLabsMessage {
   type: string;
   user_transcription_event?: { user_transcript?: string };
@@ -27,7 +20,8 @@ interface ElevenLabsMessage {
 }
 
 /**
- * Linear-interpolation downsampler: Float32 @ srcRate → Int16 @ 16 kHz.
+ * Linear-interpolation downsampler: float32 @ srcRate → Int16 @ 16 kHz.
+ * Runs at the system's native AudioContext rate so getUserMedia never fails.
  */
 function downsampleToInt16(input: Float32Array, srcRate: number): Int16Array {
   const ratio = srcRate / ELEVENLABS_SAMPLE_RATE;
@@ -50,13 +44,13 @@ export function useConversation(appState: AppState) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  // One shared AudioContext for both capture and playback — this guarantees
+  // the playback context is always running when the microphone graph is active.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioPlaybackQueue | null>(null);
-  const audioEventCountRef = useRef(0);
-  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const keepAliveRef = useRef<ConstantSourceNode | null>(null);
   const levelRafRef = useRef<number | null>(null);
 
   const stopLevelMeter = useCallback(() => {
@@ -88,26 +82,20 @@ export function useConversation(appState: AppState) {
   const cleanup = useCallback(() => {
     stopLevelMeter();
 
-    // Stop keep-alive source
-    try { keepAliveRef.current?.stop(); } catch { /* already stopped */ }
-    try { keepAliveRef.current?.disconnect(); } catch { /* noop */ }
-    keepAliveRef.current = null;
-
-    try { workletNodeRef.current?.disconnect(); } catch { /* noop */ }
-    workletNodeRef.current = null;
-
+    try { processorRef.current?.disconnect(); } catch { /* noop */ }
     try { analyserRef.current?.disconnect(); } catch { /* noop */ }
-    analyserRef.current = null;
-
     try { sourceRef.current?.disconnect(); } catch { /* noop */ }
+    processorRef.current = null;
+    analyserRef.current = null;
     sourceRef.current = null;
 
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-    mediaStreamRef.current = null;
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
 
-    playbackQueueRef.current?.dispose();
+    playbackQueueRef.current?.clear();
     playbackQueueRef.current = null;
-    audioEventCountRef.current = 0;
 
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close().catch(() => undefined);
@@ -132,10 +120,6 @@ export function useConversation(appState: AppState) {
     async (raw: string) => {
       let msg: ElevenLabsMessage;
       try { msg = JSON.parse(raw); } catch { return; }
-
-      if (audioEventCountRef.current < 3 && msg.type !== 'ping') {
-        addLog('info', `Событие ElevenLabs: ${msg.type}`);
-      }
 
       switch (msg.type) {
         case 'ping': {
@@ -162,29 +146,28 @@ export function useConversation(appState: AppState) {
         }
         case 'audio': {
           const b64 = msg.audio_event?.audio_base_64;
-          if (!b64) {
-            addLog('warn', 'Событие audio пришло без audio_base_64');
-            break;
-          }
+          if (!b64) break;
+
           const ctx = audioCtxRef.current;
           const queue = playbackQueueRef.current;
-          if (!ctx || !queue) break;
+
+          if (!ctx || !queue) {
+            addLog('warn', '⚠ Аудио от агента — контекст не готов');
+            break;
+          }
+
+          addLog('info', `🔊 Аудио (${b64.length} байт) — ctx: ${ctx.state}`);
+
           try {
-            const audioEventNumber = audioEventCountRef.current + 1;
-            audioEventCountRef.current = audioEventNumber;
-            if (audioEventNumber === 1) {
-              addLog('info', `✓ Получен первый аудиофрейм агента (${b64.length} base64-символов)`);
-            } else if (audioEventNumber % 50 === 0) {
-              addLog('info', `🔊 Получено аудиофреймов агента: ${audioEventNumber}`);
+            if (ctx.state === 'suspended') {
+              await ctx.resume();
+              addLog('warn', `AudioContext возобновлён: ${ctx.state}`);
             }
-            if (ctx.state === 'suspended') await ctx.resume();
             const buffer = await decodeBase64Pcm16(ctx, b64);
-            if (audioEventNumber === 1) {
-              addLog('info', `✓ Аудиофрейм декодирован: ${buffer.length} сэмплов, ${buffer.duration.toFixed(3)} с`);
-            }
+            addLog('info', `✓ ${buffer.length} сэмплов @ ${buffer.sampleRate} Гц`);
             queue.enqueue(buffer);
           } catch (err) {
-            addLog('error', `Ошибка воспроизведения: ${err instanceof Error ? err.message : String(err)}`);
+            addLog('error', `Ошибка декодирования аудио: ${err instanceof Error ? err.message : String(err)}`);
           }
           break;
         }
@@ -208,25 +191,14 @@ export function useConversation(appState: AppState) {
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            channelCount: { ideal: 1 },
-            sampleRate: { ideal: ELEVENLABS_SAMPLE_RATE },
-            // Keep echo cancellation off so the browser cannot suppress the
-            // user's voice while the agent is speaking.
-            echoCancellation: false,
-            noiseSuppression: false,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
             autoGainControl: true,
           },
         });
         mediaStreamRef.current = stream;
-        const track = stream.getAudioTracks()[0];
-        const trackSettings = track?.getSettings();
-        addLog(
-          'info',
-          `Доступ к микрофону получен (${trackSettings?.sampleRate ?? '?'} Гц, ${trackSettings?.channelCount ?? '?'} канал, ${track?.muted ? 'заглушен' : 'активен'})`,
-        );
-        if (!track || track.readyState !== 'live' || track.muted) {
-          throw new Error('Браузер не передаёт аудиосигнал: микрофон заглушен или остановлен');
-        }
+        addLog('info', 'Доступ к микрофону получен');
 
         setCallStatus('connecting');
         addLog('info', 'Устанавливаем соединение с ElevenLabs...');
@@ -235,195 +207,80 @@ export function useConversation(appState: AppState) {
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        // Match the audio context to the actual microphone rate. This browser
-        // provides the selected microphone at 16 kHz, which is also the
-        // format ElevenLabs expects for user input.
-        const requestedRate =
-          trackSettings?.sampleRate && trackSettings.sampleRate >= 8000
-            ? trackSettings.sampleRate
-            : ELEVENLABS_SAMPLE_RATE;
-        let audioCtx: AudioContext;
-        try {
-          audioCtx = new AudioContextCtor({ sampleRate: requestedRate });
-        } catch {
-          audioCtx = new AudioContextCtor();
-        }
+        // Use the browser's native rate and downsample only the outgoing input.
+        const audioCtx = new AudioContextCtor();
         audioCtxRef.current = audioCtx;
-        const captureRate = audioCtx.sampleRate;
+        addLog('info', `AudioContext: ${audioCtx.sampleRate} Гц, состояние: ${audioCtx.state}`);
 
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+          addLog('info', `AudioContext возобновлён: ${audioCtx.state}`);
+        }
 
-        addLog('info', `AudioContext: ${captureRate} Гц, состояние: ${audioCtx.state}`);
-
-        // ── Keep-alive: ConstantSourceNode through a muted gain ──────────────
-        // Ensures the AudioContext is never auto-suspended during pauses.
-        // The signal is below the hearing threshold and muted at the gain stage.
-        const keepAlive = audioCtx.createConstantSource();
-        keepAlive.offset.value = 0.001;
-        const keepAliveGain = audioCtx.createGain();
-        keepAliveGain.gain.value = 0;
-        keepAlive.connect(keepAliveGain);
-        keepAliveGain.connect(audioCtx.destination);
-        keepAlive.start();
-        keepAliveRef.current = keepAlive;
-
-        // ── Playback queue ────────────────────────────────────────────────────
-        let playbackStarted = false;
-        playbackQueueRef.current = new AudioPlaybackQueue(
-          audioCtx,
-          (errMsg) => {
-            addLog('error', `Ошибка воспроизведения: ${errMsg}`);
-          },
-          (buffer) => {
-            if (!playbackStarted) {
-              playbackStarted = true;
-              addLog(
-                'info',
-                `✓ Динамик запущен: ${buffer.length} сэмплов, ${buffer.duration.toFixed(3)} с, состояние AudioContext: ${audioCtx.state}`,
-              );
-            }
-          },
-        );
-
-        // ── Load AudioWorklet module ──────────────────────────────────────────
-        // BASE_URL includes trailing slash, e.g. "/" or "/voice-agent/"
-        const workletUrl = `${import.meta.env.BASE_URL}worklets/mic-processor.js`;
-        addLog('info', `Загружаем AudioWorklet: ${workletUrl}`);
-        await audioCtx.audioWorklet.addModule(workletUrl);
-        addLog('info', 'AudioWorklet загружен');
+        playbackQueueRef.current = new AudioPlaybackQueue(audioCtx, (errMsg) => {
+          addLog('error', `Ошибка воспроизведения: ${errMsg}`);
+        });
 
         const ws = new WebSocket(signedUrl);
         wsRef.current = ws;
 
-        ws.onopen = async () => {
-          try {
-            // ElevenLabs requires this client-data handshake before it starts
-            // consuming user audio. The official SDK sends it before calling
-            // its audio interface; without it the agent can still play the
-            // configured first message but may ignore microphone chunks.
+        ws.onopen = () => {
+          setCallStatus('active');
+          addLog('info', 'Соединение установлено — разговор активен');
+
+          const source = audioCtx.createMediaStreamSource(stream);
+          sourceRef.current = source;
+
+          // Analyser for VU meter (read-only tap, does not affect signal path)
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          analyserRef.current = analyser;
+          source.connect(analyser);
+          startLevelMeter(analyser);
+
+          // This is the audio path from the last working version:
+          // source → analyser → ScriptProcessor → silent sink.
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processorRef.current = processor;
+          const captureRate = audioCtx.sampleRate;
+          let firstChunkLogged = false;
+
+          processor.onaudioprocess = (event) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const input = event.inputBuffer.getChannelData(0);
+            const pcm16 = downsampleToInt16(input, captureRate);
+
+            if (!firstChunkLogged) {
+              firstChunkLogged = true;
+              let sumSquares = 0;
+              let peak = 0;
+              for (let i = 0; i < input.length; i++) {
+                sumSquares += input[i] * input[i];
+                peak = Math.max(peak, Math.abs(input[i]));
+              }
+              addLog(
+                'info',
+                `✓ Первый микрофонный чанк: RMS ${Math.sqrt(sumSquares / Math.max(1, input.length)).toFixed(5)}, пик ${peak.toFixed(5)}, ${pcm16.length} сэмплов @ 16 кГц`,
+              );
+            }
+
             ws.send(JSON.stringify({
-              type: 'conversation_initiation_client_data',
-              custom_llm_extra_body: {},
-              conversation_config_override: {},
-              dynamic_variables: {},
+              user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
             }));
-            addLog('info', 'Handshake ElevenLabs отправлен — включаем микрофонный поток');
+          };
 
-            setCallStatus('active');
-            addLog('info', 'Соединение установлено — разговор активен');
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            sourceRef.current = source;
-
-            // Analyser for VU meter (read-only tap)
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            analyserRef.current = analyser;
-            source.connect(analyser);
-            startLevelMeter(analyser);
-
-            // AudioWorkletNode — runs on the audio thread, immune to main-thread
-            // congestion and AudioContext auto-suspension
-            addLog('info', 'Создаём AudioWorkletNode...');
-            const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
-            workletNodeRef.current = workletNode;
-            addLog('info', `AudioWorkletNode создан. Порог отправки: ${Math.floor(captureRate * CHUNK_DURATION_MS / 1000)} сэмплов (${CHUNK_DURATION_MS} мс)`);
-
-            // Accumulation buffer: collect native-rate chunks, then batch-send.
-            // Threshold is time-based so chunk duration stays ~100 ms regardless
-            // of AudioContext rate (e.g. 48 kHz → 4800 samples, 44.1 kHz → 4410).
-            const sendThreshold = Math.floor(captureRate * CHUNK_DURATION_MS / 1000);
-            let accumBuf: Float32Array[] = [];
-            let accumSize = 0;
-            let workletMsgCount = 0;
-            let chunksSent = 0;
-            let signalLogged = false;
-            let nonSilentLogged = false;
-
-            workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-              workletMsgCount++;
-              // Log first message and then every 50th to confirm data flows
-              if (workletMsgCount === 1) {
-                addLog('info', `✓ Воркрлет отправил первый фрейм (${event.data.length} сэмплов)`);
-              }
-
-              if (ws.readyState !== WebSocket.OPEN) return;
-              const chunk = event.data;
-              accumBuf.push(chunk);
-              accumSize += chunk.length;
-
-              if (accumSize >= sendThreshold) {
-                // Merge accumulated chunks into one contiguous buffer
-                const merged = new Float32Array(accumSize);
-                let offset = 0;
-                for (const c of accumBuf) { merged.set(c, offset); offset += c.length; }
-                accumBuf = [];
-                accumSize = 0;
-
-                let sumSquares = 0;
-                let peak = 0;
-                for (let i = 0; i < merged.length; i++) {
-                  const sample = merged[i];
-                  sumSquares += sample * sample;
-                  peak = Math.max(peak, Math.abs(sample));
-                }
-                if (!signalLogged) {
-                  signalLogged = true;
-                  const rms = Math.sqrt(sumSquares / Math.max(1, merged.length));
-                  addLog(
-                    'info',
-                    `Микрофонный PCM: RMS ${rms.toFixed(5)}, пик ${peak.toFixed(5)}${peak < 0.001 ? ' — сигнал почти нулевой' : ''}`,
-                  );
-                }
-                if (!nonSilentLogged && peak >= 0.005) {
-                  nonSilentLogged = true;
-                  const rms = Math.sqrt(sumSquares / Math.max(1, merged.length));
-                  addLog('info', `✓ Голосовой сигнал обнаружен: RMS ${rms.toFixed(5)}, пик ${peak.toFixed(5)}`);
-                }
-
-                const pcm16 = downsampleToInt16(merged, captureRate);
-                ws.send(JSON.stringify({
-                  user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
-                }));
-
-                chunksSent++;
-                if (chunksSent === 1) {
-                  addLog('info', `✓ Первый аудиочанк отправлен (${pcm16.length} сэмплов @ 16 кГц → ${pcm16.byteLength} байт)`);
-                } else if (chunksSent % 20 === 0) {
-                  addLog('info', `📤 Отправлено чанков: ${chunksSent} (воркрлет-сообщений: ${workletMsgCount})`);
-                }
-              }
-            };
-
-            workletNode.port.onmessageerror = (e) => {
-              addLog('error', `Ошибка порта воркрлета: ${String(e)}`);
-            };
-
-            // Match the official ElevenLabs input graph:
-            // source → analyser → worklet. Analyser is transparent and also
-            // powers the live VU meter.
-            analyser.connect(workletNode);
-            // Connect output to a silent sink so Chrome treats the graph as active
-            const sink = audioCtx.createGain();
-            sink.gain.value = 0;
-            workletNode.connect(sink);
-            sink.connect(audioCtx.destination);
-
-            addLog('info', 'Аудиограф подключён — ожидаем фреймы от микрофона');
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            addLog('error', `Ошибка при настройке аудио в onopen: ${msg}`);
-            setCallStatus('idle');
-            cleanup();
-          }
+          // ScriptProcessorNode must be connected to an output to stay active.
+          // The zero-gain sink prevents microphone audio from reaching speakers.
+          analyser.connect(processor);
+          const sink = audioCtx.createGain();
+          sink.gain.value = 0;
+          processor.connect(sink);
+          sink.connect(audioCtx.destination);
+          addLog('info', 'Аудиограф подключён — микрофонный поток отправляется');
         };
 
         ws.onmessage = (event) => {
-          if (typeof event.data === 'string') {
-            handleServerMessage(event.data);
-          } else {
-            addLog('warn', `Получено нестроковое WebSocket-событие: ${typeof event.data}`);
-          }
+          if (typeof event.data === 'string') handleServerMessage(event.data);
         };
 
         ws.onerror = () => {

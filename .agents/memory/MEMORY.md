@@ -1,0 +1,1 @@
+- [Voice input compatibility](voice-input-compatibility.md) — для текущего ConvAI-потока рабочей оказалась нативная ScriptProcessor-схема; переход на Worklet нарушил распознавание.
