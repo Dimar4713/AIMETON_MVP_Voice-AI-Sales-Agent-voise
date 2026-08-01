@@ -3,13 +3,19 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Voice AI Sales Agent API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: settings
+    description: API key settings
+  - name: agent
+    description: ElevenLabs agent management
+  - name: conversation
+    description: Conversation management
 paths:
   /healthz:
     get:
@@ -24,6 +30,121 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /settings/save-key:
+    post:
+      operationId: saveApiKey
+      tags: [settings]
+      summary: Save ElevenLabs API key
+      description: Validates and saves the API key on the server. The key is never returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiKeyInput"
+      responses:
+        "200":
+          description: Key saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveKeyResult"
+        "400":
+          description: Invalid key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResult"
+
+  /settings/status:
+    get:
+      operationId: getSettingsStatus
+      tags: [settings]
+      summary: Get settings status
+      description: Returns whether an API key has been saved
+      responses:
+        "200":
+          description: Settings status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsStatus"
+
+  /agent/create:
+    post:
+      operationId: createAgent
+      tags: [agent]
+      summary: Create ElevenLabs AI sales agent
+      description: Creates a new AI sales agent via ElevenLabs API using the saved key
+      responses:
+        "200":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCreateResult"
+        "400":
+          description: Error creating agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResult"
+
+  /agent/status:
+    get:
+      operationId: getAgentStatus
+      tags: [agent]
+      summary: Get agent status
+      description: Returns whether an agent has been created and its ID
+      responses:
+        "200":
+          description: Agent status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStatus"
+
+  /conversation/signed-url:
+    get:
+      operationId: getSignedUrl
+      tags: [conversation]
+      summary: Get signed URL for conversation
+      description: Server-side fetches a signed WebSocket URL from ElevenLabs for the saved agent
+      responses:
+        "200":
+          description: Signed URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedUrlResult"
+        "400":
+          description: Error getting URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResult"
+
+  /logs/client-event:
+    post:
+      operationId: logClientEvent
+      tags: [conversation]
+      summary: Log a client-side event
+      description: Optionally logs a client event to the server log
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEventInput"
+      responses:
+        "200":
+          description: Logged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogResult"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +155,85 @@ components:
       required:
         - status
 
+    ApiKeyInput:
+      type: object
+      required: [apiKey]
+      properties:
+        apiKey:
+          type: string
+          minLength: 1
+          description: ElevenLabs API key
+
+    SaveKeyResult:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    SettingsStatus:
+      type: object
+      required: [keySaved]
+      properties:
+        keySaved:
+          type: boolean
+        maskedKey:
+          type: ["string", "null"]
+          description: Partially masked key for display (e.g. "sk_...xxxx"), never the full key
+
+    AgentCreateResult:
+      type: object
+      required: [success, agentId]
+      properties:
+        success:
+          type: boolean
+        agentId:
+          type: string
+        message:
+          type: string
+
+    AgentStatus:
+      type: object
+      required: [hasAgent]
+      properties:
+        hasAgent:
+          type: boolean
+        agentId:
+          type: ["string", "null"]
+
+    SignedUrlResult:
+      type: object
+      required: [signedUrl]
+      properties:
+        signedUrl:
+          type: string
+          description: Signed WebSocket URL for ElevenLabs conversation
+
+    ClientEventInput:
+      type: object
+      required: [level, message]
+      properties:
+        level:
+          type: string
+          enum: [info, warn, error]
+        message:
+          type: string
+        data:
+          type: ["string", "null"]
+          description: Optional JSON-serialized data payload
+
+    LogResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    ErrorResult:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

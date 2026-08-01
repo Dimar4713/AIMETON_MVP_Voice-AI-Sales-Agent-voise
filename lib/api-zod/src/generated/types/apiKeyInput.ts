@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
-  status: string;
+export interface ApiKeyInput {
+  /**
+     * ElevenLabs API key
+     * @minLength 1
+     */
+  apiKey: string;
 }

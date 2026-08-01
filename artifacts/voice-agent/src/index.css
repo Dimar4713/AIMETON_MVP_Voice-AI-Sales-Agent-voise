@@ -1,0 +1,397 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: var(--primary-border);
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-secondary-border: var(--secondary-border);
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-muted-border: var(--muted-border);
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-border: var(--accent-border);
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-destructive-border: var(--destructive-border);
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-primary-border: var(--sidebar-primary-border);
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-accent-border: var(--sidebar-accent-border);
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-sans: var(--app-font-sans);
+  --font-serif: var(--app-font-serif);
+  --font-mono: var(--app-font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Mission control theme -- dark graphite/ink base with a signal-teal accent.
+   This product lives on-screen for hours, so it is dark by design, not by
+   default: the palette is tuned for long monitoring sessions. */
+:root {
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.06);
+
+  --opaque-button-border-intensity: 9;
+
+  --elevate-1: rgba(255, 255, 255, 0.045);
+  --elevate-2: rgba(255, 255, 255, 0.09);
+
+  --background: 222 28% 7%;
+  --foreground: 210 28% 95%;
+
+  --border: 220 18% 18%;
+
+  --card: 222 26% 10%;
+  --card-foreground: 210 28% 95%;
+  --card-border: 220 18% 18%;
+
+  --sidebar: 222 26% 9%;
+  --sidebar-foreground: 210 28% 95%;
+  --sidebar-border: 220 18% 18%;
+  --sidebar-primary: 158 64% 42%;
+  --sidebar-primary-foreground: 222 30% 8%;
+  --sidebar-accent: 220 18% 15%;
+  --sidebar-accent-foreground: 210 28% 95%;
+  --sidebar-ring: 158 64% 42%;
+
+  --popover: 222 28% 9%;
+  --popover-foreground: 210 28% 95%;
+  --popover-border: 220 18% 18%;
+
+  --primary: 158 64% 42%;
+  --primary-foreground: 222 32% 7%;
+
+  --secondary: 220 18% 15%;
+  --secondary-foreground: 210 24% 90%;
+
+  --muted: 220 18% 13%;
+  --muted-foreground: 215 14% 60%;
+
+  --accent: 35 92% 55%;
+  --accent-foreground: 222 32% 8%;
+
+  --destructive: 357 75% 56%;
+  --destructive-foreground: 0 0% 98%;
+
+  --input: 220 16% 20%;
+  --ring: 158 64% 42%;
+  --chart-1: 158 64% 42%;
+  --chart-2: 35 92% 55%;
+  --chart-3: 357 75% 56%;
+  --chart-4: 205 80% 56%;
+  --chart-5: 262 55% 62%;
+
+  --app-font-sans: 'Outfit', sans-serif;
+  --app-font-serif: Georgia, serif;
+  --app-font-mono: 'JetBrains Mono', monospace;
+  --radius: 0.625rem;
+  --shadow-2xs: 0px 2px 0px 0px hsl(222 28% 3% / 0);
+  --shadow-xs: 0px 2px 0px 0px hsl(222 28% 3% / 0);
+  --shadow-sm:
+    0px 2px 0px 0px hsl(222 28% 3% / 0),
+    0px 1px 2px -1px hsl(222 28% 3% / 0);
+  --shadow:
+    0px 4px 12px 0px hsl(222 40% 2% / 0.35),
+    0px 1px 2px -1px hsl(222 28% 3% / 0.2);
+  --shadow-md:
+    0px 6px 16px 0px hsl(222 40% 2% / 0.4),
+    0px 2px 4px -1px hsl(222 28% 3% / 0.2);
+  --shadow-lg:
+    0px 10px 28px 0px hsl(222 40% 2% / 0.45),
+    0px 4px 6px -1px hsl(222 28% 3% / 0.2);
+  --shadow-xl:
+    0px 16px 40px 0px hsl(222 40% 2% / 0.5),
+    0px 8px 10px -1px hsl(222 28% 3% / 0.2);
+  --shadow-2xl: 0px 24px 56px 0px hsl(222 40% 2% / 0.55);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(
+    from hsl(var(--sidebar-primary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(
+    from hsl(var(--sidebar-accent)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(
+    from hsl(var(--primary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(
+    from hsl(var(--secondary)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(
+    from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) /
+      alpha
+  );
+
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(
+    from hsl(var(--accent)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(
+    from hsl(var(--destructive)) h s
+      calc(l + var(--opaque-button-border-intensity)) / alpha
+  );
+}
+
+.dark {
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.06);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255, 255, 255, 0.045);
+  --elevate-2: rgba(255, 255, 255, 0.09);
+
+  --background: 222 28% 7%;
+  --foreground: 210 28% 95%;
+  --border: 220 18% 18%;
+  --card: 222 26% 10%;
+  --card-foreground: 210 28% 95%;
+  --card-border: 220 18% 18%;
+  --sidebar: 222 26% 9%;
+  --sidebar-foreground: 210 28% 95%;
+  --sidebar-border: 220 18% 18%;
+  --sidebar-primary: 158 64% 42%;
+  --sidebar-primary-foreground: 222 30% 8%;
+  --sidebar-accent: 220 18% 15%;
+  --sidebar-accent-foreground: 210 28% 95%;
+  --sidebar-ring: 158 64% 42%;
+  --popover: 222 28% 9%;
+  --popover-foreground: 210 28% 95%;
+  --popover-border: 220 18% 18%;
+  --primary: 158 64% 42%;
+  --primary-foreground: 222 32% 7%;
+  --secondary: 220 18% 15%;
+  --secondary-foreground: 210 24% 90%;
+  --muted: 220 18% 13%;
+  --muted-foreground: 215 14% 60%;
+  --accent: 35 92% 55%;
+  --accent-foreground: 222 32% 8%;
+  --destructive: 357 75% 56%;
+  --destructive-foreground: 0 0% 98%;
+  --input: 220 16% 20%;
+  --ring: 158 64% 42%;
+  --chart-1: 158 64% 42%;
+  --chart-2: 35 92% 55%;
+  --chart-3: 357 75% 56%;
+  --chart-4: 205 80% 56%;
+  --chart-5: 262 55% 62%;
+
+  --shadow-2xs: 0px 2px 0px 0px hsl(222 28% 3% / 0);
+  --shadow-xs: 0px 2px 0px 0px hsl(222 28% 3% / 0);
+  --shadow-sm:
+    0px 2px 0px 0px hsl(222 28% 3% / 0),
+    0px 1px 2px -1px hsl(222 28% 3% / 0);
+  --shadow:
+    0px 4px 12px 0px hsl(222 40% 2% / 0.35),
+    0px 1px 2px -1px hsl(222 28% 3% / 0.2);
+  --shadow-md:
+    0px 6px 16px 0px hsl(222 40% 2% / 0.4),
+    0px 2px 4px -1px hsl(222 28% 3% / 0.2);
+  --shadow-lg:
+    0px 10px 28px 0px hsl(222 40% 2% / 0.45),
+    0px 4px 6px -1px hsl(222 28% 3% / 0.2);
+  --shadow-xl:
+    0px 16px 40px 0px hsl(222 40% 2% / 0.5),
+    0px 8px 10px -1px hsl(222 28% 3% / 0.2);
+  --shadow-2xl: 0px 24px 56px 0px hsl(222 40% 2% / 0.55);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 15% 0%, hsl(158 64% 42% / 0.07), transparent 40%),
+      radial-gradient(circle at 100% 20%, hsl(35 92% 55% / 0.05), transparent 45%);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  input[type='search']::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  .no-default-hover-elevate {
+  }
+
+  .no-default-active-elevate {
+  }
+
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: -1;
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: 999;
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+
+  .font-mono-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-glow-primary {
+    text-shadow: 0 0 24px hsl(var(--primary) / 0.35);
+  }
+}
+
+@keyframes signal-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes soft-rise {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-signal-ring {
+  animation: signal-ring 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+.animate-soft-rise {
+  animation: soft-rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Custom scrollbar for the logs terminal */
+.logs-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.logs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.logs-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 999px;
+}

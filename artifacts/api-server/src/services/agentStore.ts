@@ -1,0 +1,43 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+import { logger } from "../lib/logger";
+
+const DATA_DIR = path.resolve(process.cwd(), ".data");
+const AGENT_FILE = path.join(DATA_DIR, "agent.json");
+
+interface AgentData {
+  agentId?: string;
+}
+
+async function ensureDataDir(): Promise<void> {
+  await mkdir(DATA_DIR, { recursive: true });
+}
+
+async function readAgentData(): Promise<AgentData> {
+  try {
+    const raw = await readFile(AGENT_FILE, "utf-8");
+    return JSON.parse(raw) as AgentData;
+  } catch {
+    return {};
+  }
+}
+
+async function writeAgentData(data: AgentData): Promise<void> {
+  await ensureDataDir();
+  await writeFile(AGENT_FILE, JSON.stringify(data, null, 2), "utf-8");
+}
+
+export async function saveAgentId(agentId: string): Promise<void> {
+  await writeAgentData({ agentId });
+  logger.info({ agentId }, "Agent ID saved to agent store");
+}
+
+export async function getAgentId(): Promise<string | null> {
+  const data = await readAgentData();
+  return data.agentId ?? null;
+}
+
+export async function hasAgent(): Promise<boolean> {
+  const id = await getAgentId();
+  return id !== null && id.length > 0;
+}
