@@ -34,8 +34,7 @@ function nextLogId() {
 
 /**
  * Central UI state for the voice agent command center: key/agent/call
- * status plus the running event log. This hook does not talk to the
- * network itself -- callers (App, useConversation) push updates into it.
+ * status, the running event log, and the live mic level (0-100).
  */
 export function useAppState() {
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({
@@ -48,6 +47,7 @@ export function useAppState() {
   });
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [micLevel, setMicLevel] = useState<number>(0);
 
   const addLog = useCallback((level: LogLevel, message: string) => {
     setLogs((prev) => {
@@ -55,8 +55,6 @@ export function useAppState() {
         ...prev,
         { id: nextLogId(), timestamp: new Date(), level, message },
       ];
-      // Keep the log buffer bounded so a long-running session doesn't
-      // balloon memory or DOM nodes.
       if (next.length > 300) {
         return next.slice(next.length - 300);
       }
@@ -77,8 +75,10 @@ export function useAppState() {
       logs,
       addLog,
       clearLogs,
+      micLevel,
+      setMicLevel,
     }),
-    [keyStatus, agentStatus, callStatus, logs, addLog, clearLogs],
+    [keyStatus, agentStatus, callStatus, logs, addLog, clearLogs, micLevel],
   );
 }
 

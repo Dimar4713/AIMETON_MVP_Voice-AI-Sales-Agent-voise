@@ -25,6 +25,7 @@ import {
   Sparkles,
   ShieldCheck,
 } from 'lucide-react';
+import { MicLevelBar, MicTestPanel } from '@/components/mic-level';
 import { cn } from '@/lib/utils';
 
 const callStatusMeta: Record<
@@ -40,7 +41,7 @@ const callStatusMeta: Record<
 
 export default function Dashboard() {
   const appState = useAppState();
-  const { keyStatus, setKeyStatus, agentStatus, setAgentStatus, callStatus, setCallStatus, logs, addLog } =
+  const { keyStatus, setKeyStatus, agentStatus, setAgentStatus, callStatus, setCallStatus, logs, addLog, micLevel } =
     appState;
   const { startCall, endCall } = useConversation(appState);
 
@@ -193,7 +194,7 @@ export default function Dashboard() {
               </div>
 
               {/* Central call visual */}
-              <div className="mb-8 flex items-center justify-center py-6">
+              <div className="mb-6 flex items-center justify-center py-4">
                 <div className="relative flex h-40 w-40 items-center justify-center sm:h-48 sm:w-48">
                   {isCallActive && (
                     <>
@@ -223,6 +224,21 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+
+              {/* Live mic level — only visible during active call */}
+              {isCallActive && (
+                <div className="mb-5 rounded-lg border border-[hsl(var(--primary))]/20 bg-[hsl(var(--primary))]/5 px-4 py-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Сигнал микрофона
+                  </p>
+                  <MicLevelBar level={micLevel} />
+                  {micLevel === 0 && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Индикатор молчит — убедитесь, что микрофон не заглушён в системе
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Action buttons */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -311,9 +327,12 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Logs column */}
-          <div className="min-h-[420px] lg:min-h-0">
-            <LogsPanel logs={logs} />
+          {/* Right column: mic test + logs */}
+          <div className="flex min-h-[420px] flex-col gap-6 lg:min-h-0">
+            <MicTestPanel />
+            <div className="flex-1">
+              <LogsPanel logs={logs} />
+            </div>
           </div>
         </div>
       </main>

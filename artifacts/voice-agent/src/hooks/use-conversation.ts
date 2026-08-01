@@ -6,6 +6,8 @@ import {
 } from '@/lib/audio-queue';
 import type { AppState } from '@/hooks/use-app-state';
 
+const ELEVENLABS_SAMPLE_RATE = 16000; // ElevenLabs expects 16 kHz PCM16 mono
+
 interface ElevenLabsMessage {
   type: string;
   user_transcription_event?: { user_transcript?: string };
@@ -20,9 +22,15 @@ interface ElevenLabsMessage {
  * Owns the ElevenLabs realtime conversation: websocket lifecycle,
  * microphone capture, outbound audio streaming, and inbound audio
  * playback. All state transitions are reported through `appState`.
+ *
+ * IMPORTANT: ElevenLabs expects 16 kHz PCM16 mono audio.
+ * We create the capture AudioContext at exactly 16000 Hz so that no
+ * resampling is needed — sending at the system rate (44100 / 48000 Hz)
+ * causes the agent to hear garbled high-pitched audio and not understand
+ * the user.
  */
 export function useConversation(appState: AppState) {
-  const { addLog, setCallStatus } = appState;
+  const { addLog, setCallStatus, setMicLevel } = appState;
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -31,10 +39,47 @@ export function useConversation(appState: AppState) {
   const playbackQueueRef = useRef<AudioPlaybackQueue | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelRafRef = useRef<number | null>(null);
+
+  const stopLevelMeter = useCallback(() => {
+    if (levelRafRef.current !== null) {
+      cancelAnimationFrame(levelRafRef.current);
+      levelRafRef.current = null;
+    }
+    setMicLevel(0);
+  }, [setMicLevel]);
+
+  const startLevelMeter = useCallback(
+    (analyser: AnalyserNode) => {
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteTimeDomainData(data);
+        // RMS of the time-domain samples, mapped to 0-100
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const s = (data[i] - 128) / 128;
+          sum += s * s;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        setMicLevel(Math.min(100, Math.round(rms * 300)));
+        levelRafRef.current = requestAnimationFrame(tick);
+      };
+      levelRafRef.current = requestAnimationFrame(tick);
+    },
+    [setMicLevel],
+  );
 
   const cleanup = useCallback(() => {
+    stopLevelMeter();
+
     try {
       processorRef.current?.disconnect();
+    } catch {
+      /* noop */
+    }
+    try {
+      analyserRef.current?.disconnect();
     } catch {
       /* noop */
     }
@@ -44,6 +89,7 @@ export function useConversation(appState: AppState) {
       /* noop */
     }
     processorRef.current = null;
+    analyserRef.current = null;
     sourceRef.current = null;
 
     if (mediaStreamRef.current) {
@@ -75,7 +121,7 @@ export function useConversation(appState: AppState) {
       }
       wsRef.current = null;
     }
-  }, []);
+  }, [stopLevelMeter]);
 
   const handleServerMessage = useCallback(
     async (raw: string) => {
@@ -107,7 +153,8 @@ export function useConversation(appState: AppState) {
           break;
         }
         case 'agent_response_correction': {
-          const text = msg.agent_response_correction_event?.corrected_agent_response;
+          const text =
+            msg.agent_response_correction_event?.corrected_agent_response;
           if (text) addLog('info', `Агент (исправлено): ${text}`);
           break;
         }
@@ -120,7 +167,7 @@ export function useConversation(appState: AppState) {
                 b64,
               );
               playbackQueueRef.current.enqueue(buffer);
-            } catch (err) {
+            } catch {
               addLog('error', 'Не удалось декодировать аудиофрагмент');
             }
           }
@@ -147,8 +194,10 @@ export function useConversation(appState: AppState) {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
+            sampleRate: ELEVENLABS_SAMPLE_RATE,
             echoCancellation: true,
             noiseSuppression: true,
+            autoGainControl: true,
           },
         });
         mediaStreamRef.current = stream;
@@ -162,9 +211,17 @@ export function useConversation(appState: AppState) {
           (window as unknown as { webkitAudioContext: typeof AudioContext })
             .webkitAudioContext;
 
-        const audioContext = new AudioContextCtor();
+        // CRITICAL: create the capture context at exactly 16000 Hz.
+        // If the context runs at the system default (44100/48000 Hz), the
+        // ScriptProcessor produces samples at that rate and ElevenLabs receives
+        // audio that is 2.75–3× too fast / high-pitched and cannot transcribe it.
+        const audioContext = new AudioContextCtor({
+          sampleRate: ELEVENLABS_SAMPLE_RATE,
+        });
         audioContextRef.current = audioContext;
 
+        // Playback context can run at any rate; we decode PCM16 at 16 kHz
+        // inside decodeBase64Pcm16 and the browser resamples on playback.
         const playbackCtx = new AudioContextCtor();
         playbackCtxRef.current = playbackCtx;
         playbackQueueRef.current = new AudioPlaybackQueue(playbackCtx);
@@ -174,30 +231,39 @@ export function useConversation(appState: AppState) {
 
         ws.onopen = () => {
           setCallStatus('active');
-          addLog('info', 'Соединение установлено — разговор активен');
+          addLog(
+            'info',
+            `Соединение установлено — разговор активен (${ELEVENLABS_SAMPLE_RATE} Гц, PCM16)`,
+          );
 
           const source = audioContext.createMediaStreamSource(stream);
           sourceRef.current = source;
+
+          // Analyser for the live mic-level meter (does not affect the signal)
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          analyserRef.current = analyser;
+          source.connect(analyser);
+          startLevelMeter(analyser);
+
+          // ScriptProcessor: forward PCM16 chunks to ElevenLabs
           const processor = audioContext.createScriptProcessor(4096, 1, 1);
           processorRef.current = processor;
 
           processor.onaudioprocess = (event) => {
             if (ws.readyState !== WebSocket.OPEN) return;
             const input = event.inputBuffer.getChannelData(0);
+            // Convert float32 samples [-1, 1] → Int16
             const pcm16 = new Int16Array(input.length);
             for (let i = 0; i < input.length; i++) {
               const s = Math.max(-1, Math.min(1, input[i]));
               pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
             const base64 = arrayBufferToBase64(pcm16.buffer);
-            ws.send(
-              JSON.stringify({
-                user_audio_chunk: base64,
-              }),
-            );
+            ws.send(JSON.stringify({ user_audio_chunk: base64 }));
           };
 
-          source.connect(processor);
+          analyser.connect(processor);
           processor.connect(audioContext.destination);
         };
 
@@ -213,7 +279,7 @@ export function useConversation(appState: AppState) {
 
         ws.onclose = () => {
           addLog('warn', 'Соединение с ElevenLabs закрыто');
-          setCallStatus((prev) => (prev === 'ending' ? 'idle' : 'idle'));
+          setCallStatus('idle');
           cleanup();
         };
       } catch (err) {
@@ -224,7 +290,7 @@ export function useConversation(appState: AppState) {
         cleanup();
       }
     },
-    [addLog, cleanup, handleServerMessage, setCallStatus],
+    [addLog, cleanup, handleServerMessage, setCallStatus, startLevelMeter],
   );
 
   const endCall = useCallback(() => {
