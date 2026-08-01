@@ -70,6 +70,13 @@ function MicTest() {
     setLevel(0);
   }, []);
 
+  // Manual cancel from the button — also resets UI state so the test can be re-run
+  const cancelTest = useCallback(() => {
+    stopTest();
+    setState('idle');
+    setPeakLevel(0);
+  }, [stopTest]);
+
   useEffect(() => () => stopTest(), [stopTest]);
 
   const runTest = useCallback(async () => {
@@ -146,7 +153,7 @@ function MicTest() {
       <Button
         size="sm"
         variant={state === 'testing' ? 'secondary' : 'outline'}
-        onClick={state === 'testing' ? stopTest : runTest}
+        onClick={state === 'testing' ? cancelTest : runTest}
         className="w-full text-xs"
       >
         {state === 'testing' ? (
