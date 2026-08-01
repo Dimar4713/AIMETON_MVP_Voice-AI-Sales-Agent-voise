@@ -9,6 +9,13 @@ import type { AppState } from '@/hooks/use-app-state';
 /** ElevenLabs expects 16 kHz PCM16 mono audio on the inbound stream. */
 const ELEVENLABS_SAMPLE_RATE = 16000;
 
+/**
+ * How many native-rate samples to accumulate before downsampling and sending.
+ * At 48 kHz → ~85 ms per chunk.  At 44100 Hz → ~93 ms.  Good balance between
+ * latency and WebSocket overhead.
+ */
+const SEND_THRESHOLD = 4096;
+
 interface ElevenLabsMessage {
   type: string;
   user_transcription_event?: { user_transcript?: string };
@@ -20,8 +27,7 @@ interface ElevenLabsMessage {
 }
 
 /**
- * Linear-interpolation downsampler: float32 @ srcRate → Int16 @ 16 kHz.
- * Runs at the system's native AudioContext rate so getUserMedia never fails.
+ * Linear-interpolation downsampler: Float32 @ srcRate → Int16 @ 16 kHz.
  */
 function downsampleToInt16(input: Float32Array, srcRate: number): Int16Array {
   const ratio = srcRate / ELEVENLABS_SAMPLE_RATE;
@@ -44,13 +50,12 @@ export function useConversation(appState: AppState) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  // One shared AudioContext for both capture and playback — this guarantees
-  // the playback context is always running when the microphone graph is active.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioPlaybackQueue | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const keepAliveRef = useRef<ConstantSourceNode | null>(null);
   const levelRafRef = useRef<number | null>(null);
 
   const stopLevelMeter = useCallback(() => {
@@ -82,17 +87,22 @@ export function useConversation(appState: AppState) {
   const cleanup = useCallback(() => {
     stopLevelMeter();
 
-    try { processorRef.current?.disconnect(); } catch { /* noop */ }
+    // Stop keep-alive source
+    try { keepAliveRef.current?.stop(); } catch { /* already stopped */ }
+    try { keepAliveRef.current?.disconnect(); } catch { /* noop */ }
+    keepAliveRef.current = null;
+
+    try { workletNodeRef.current?.disconnect(); } catch { /* noop */ }
+    workletNodeRef.current = null;
+
     try { analyserRef.current?.disconnect(); } catch { /* noop */ }
-    try { sourceRef.current?.disconnect(); } catch { /* noop */ }
-    processorRef.current = null;
     analyserRef.current = null;
+
+    try { sourceRef.current?.disconnect(); } catch { /* noop */ }
     sourceRef.current = null;
 
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
 
     playbackQueueRef.current?.clear();
     playbackQueueRef.current = null;
@@ -147,27 +157,15 @@ export function useConversation(appState: AppState) {
         case 'audio': {
           const b64 = msg.audio_event?.audio_base_64;
           if (!b64) break;
-
           const ctx = audioCtxRef.current;
           const queue = playbackQueueRef.current;
-
-          if (!ctx || !queue) {
-            addLog('warn', '⚠ Аудио от агента — контекст не готов');
-            break;
-          }
-
-          addLog('info', `🔊 Аудио (${b64.length} байт) — ctx: ${ctx.state}`);
-
+          if (!ctx || !queue) break;
           try {
-            if (ctx.state === 'suspended') {
-              await ctx.resume();
-              addLog('warn', `AudioContext возобновлён: ${ctx.state}`);
-            }
+            if (ctx.state === 'suspended') await ctx.resume();
             const buffer = await decodeBase64Pcm16(ctx, b64);
-            addLog('info', `✓ ${buffer.length} сэмплов @ ${buffer.sampleRate} Гц`);
             queue.enqueue(buffer);
           } catch (err) {
-            addLog('error', `Ошибка декодирования аудио: ${err instanceof Error ? err.message : String(err)}`);
+            addLog('error', `Ошибка воспроизведения: ${err instanceof Error ? err.message : String(err)}`);
           }
           break;
         }
@@ -207,63 +205,91 @@ export function useConversation(appState: AppState) {
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        // Single shared AudioContext for capture + playback.
-        // System-native sample rate (44100/48000 Hz) — universally supported.
-        // We downsample to 16 kHz manually when sending; the browser resamples
-        // our 16 kHz playback buffers automatically on output.
         const audioCtx = new AudioContextCtor();
         audioCtxRef.current = audioCtx;
-        addLog('info', `AudioContext: ${audioCtx.sampleRate} Гц, состояние: ${audioCtx.state}`);
+        const captureRate = audioCtx.sampleRate;
 
-        // Resume if needed (Chrome autoplay policy)
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-          addLog('info', `AudioContext возобновлён: ${audioCtx.state}`);
-        }
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
 
+        addLog('info', `AudioContext: ${captureRate} Гц, состояние: ${audioCtx.state}`);
+
+        // ── Keep-alive: ConstantSourceNode through a muted gain ──────────────
+        // Ensures the AudioContext is never auto-suspended during pauses.
+        // The signal is below the hearing threshold and muted at the gain stage.
+        const keepAlive = audioCtx.createConstantSource();
+        keepAlive.offset.value = 0.001;
+        const keepAliveGain = audioCtx.createGain();
+        keepAliveGain.gain.value = 0;
+        keepAlive.connect(keepAliveGain);
+        keepAliveGain.connect(audioCtx.destination);
+        keepAlive.start();
+        keepAliveRef.current = keepAlive;
+
+        // ── Playback queue ────────────────────────────────────────────────────
         playbackQueueRef.current = new AudioPlaybackQueue(audioCtx, (errMsg) => {
           addLog('error', `Ошибка воспроизведения: ${errMsg}`);
         });
 
+        // ── Load AudioWorklet module ──────────────────────────────────────────
+        // BASE_URL includes trailing slash, e.g. "/" or "/voice-agent/"
+        const workletUrl = `${import.meta.env.BASE_URL}worklets/mic-processor.js`;
+        addLog('info', `Загружаем AudioWorklet: ${workletUrl}`);
+        await audioCtx.audioWorklet.addModule(workletUrl);
+        addLog('info', 'AudioWorklet загружен');
+
         const ws = new WebSocket(signedUrl);
         wsRef.current = ws;
 
-        ws.onopen = () => {
+        ws.onopen = async () => {
           setCallStatus('active');
           addLog('info', 'Соединение установлено — разговор активен');
 
           const source = audioCtx.createMediaStreamSource(stream);
           sourceRef.current = source;
 
-          // Analyser for VU meter (read-only tap, does not affect signal path)
+          // Analyser for VU meter (read-only tap)
           const analyser = audioCtx.createAnalyser();
           analyser.fftSize = 256;
           analyserRef.current = analyser;
           source.connect(analyser);
           startLevelMeter(analyser);
 
-          // ScriptProcessor: downsample from native rate → 16 kHz, forward to ElevenLabs
-          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-          processorRef.current = processor;
-          const captureRate = audioCtx.sampleRate;
+          // AudioWorkletNode — runs on the audio thread, immune to main-thread
+          // congestion and AudioContext auto-suspension
+          const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
+          workletNodeRef.current = workletNode;
 
-          processor.onaudioprocess = (event) => {
+          // Accumulation buffer: collect native-rate chunks, then batch-send
+          let accumBuf: Float32Array[] = [];
+          let accumSize = 0;
+
+          workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
             if (ws.readyState !== WebSocket.OPEN) return;
-            const input = event.inputBuffer.getChannelData(0);
-            const pcm16 = downsampleToInt16(input, captureRate);
-            ws.send(JSON.stringify({ user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer) }));
+            const chunk = event.data;
+            accumBuf.push(chunk);
+            accumSize += chunk.length;
+
+            if (accumSize >= SEND_THRESHOLD) {
+              // Merge accumulated chunks into one contiguous buffer
+              const merged = new Float32Array(accumSize);
+              let offset = 0;
+              for (const c of accumBuf) { merged.set(c, offset); offset += c.length; }
+              accumBuf = [];
+              accumSize = 0;
+
+              const pcm16 = downsampleToInt16(merged, captureRate);
+              ws.send(JSON.stringify({
+                user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
+              }));
+            }
           };
 
-          // Connect capture graph: source → analyser → processor.
-          // Processor must be connected to destination to stay active.
-          analyser.connect(processor);
-          // Connect processor to a silenced GainNode instead of destination.
-          // ScriptProcessorNode must be connected to stay active, but routing
-          // mic audio to the speaker destination on the same context as playback
-          // triggers the browser's echo-cancellation and suppresses agent audio.
+          // source → analyser → workletNode (processes audio; output discarded)
+          analyser.connect(workletNode);
+          // Connect output to a silent sink so Chrome treats the graph as active
           const sink = audioCtx.createGain();
           sink.gain.value = 0;
-          processor.connect(sink);
+          workletNode.connect(sink);
           sink.connect(audioCtx.destination);
         };
 
