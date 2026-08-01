@@ -192,9 +192,12 @@ export function useConversation(appState: AppState) {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            // The agent is played from this same page. Browser echo
+            // cancellation can treat the user's voice as part of the
+            // playback signal and remove it before ElevenLabs receives it.
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
           },
         });
         mediaStreamRef.current = stream;
@@ -225,6 +228,17 @@ export function useConversation(appState: AppState) {
         wsRef.current = ws;
 
         ws.onopen = () => {
+          // This client-data message is required before ElevenLabs starts
+          // consuming user_audio_chunk messages. Without it, the agent can
+          // still play its configured first message while ignoring the mic.
+          ws.send(JSON.stringify({
+            type: 'conversation_initiation_client_data',
+            custom_llm_extra_body: {},
+            conversation_config_override: {},
+            dynamic_variables: {},
+          }));
+          addLog('info', 'Handshake ElevenLabs отправлен — включаем микрофонный поток');
+
           setCallStatus('active');
           addLog('info', 'Соединение установлено — разговор активен');
 
@@ -244,6 +258,7 @@ export function useConversation(appState: AppState) {
           processorRef.current = processor;
           const captureRate = audioCtx.sampleRate;
           let firstChunkLogged = false;
+          let chunksSent = 0;
 
           processor.onaudioprocess = (event) => {
             if (ws.readyState !== WebSocket.OPEN) return;
@@ -267,6 +282,10 @@ export function useConversation(appState: AppState) {
             ws.send(JSON.stringify({
               user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
             }));
+            chunksSent++;
+            if (chunksSent % 20 === 0) {
+              addLog('info', `📤 Отправлено аудиочанков: ${chunksSent}`);
+            }
           };
 
           // ScriptProcessorNode must be connected to an output to stay active.
@@ -287,8 +306,11 @@ export function useConversation(appState: AppState) {
           addLog('error', 'Ошибка WebSocket-соединения');
         };
 
-        ws.onclose = () => {
-          addLog('warn', 'Соединение с ElevenLabs закрыто');
+        ws.onclose = (event) => {
+          addLog(
+            'warn',
+            `Соединение с ElevenLabs закрыто (код ${event.code}, ${event.wasClean ? 'чисто' : 'аварийно'}${event.reason ? `: ${event.reason}` : ''})`,
+          );
           setCallStatus('idle');
           cleanup();
         };
