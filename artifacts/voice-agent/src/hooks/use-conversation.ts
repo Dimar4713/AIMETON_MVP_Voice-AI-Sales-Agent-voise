@@ -244,59 +244,89 @@ export function useConversation(appState: AppState) {
         wsRef.current = ws;
 
         ws.onopen = async () => {
-          setCallStatus('active');
-          addLog('info', 'Соединение установлено — разговор активен');
+          try {
+            setCallStatus('active');
+            addLog('info', 'Соединение установлено — разговор активен');
 
-          const source = audioCtx.createMediaStreamSource(stream);
-          sourceRef.current = source;
+            const source = audioCtx.createMediaStreamSource(stream);
+            sourceRef.current = source;
 
-          // Analyser for VU meter (read-only tap)
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 256;
-          analyserRef.current = analyser;
-          source.connect(analyser);
-          startLevelMeter(analyser);
+            // Analyser for VU meter (read-only tap)
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            analyserRef.current = analyser;
+            source.connect(analyser);
+            startLevelMeter(analyser);
 
-          // AudioWorkletNode — runs on the audio thread, immune to main-thread
-          // congestion and AudioContext auto-suspension
-          const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
-          workletNodeRef.current = workletNode;
+            // AudioWorkletNode — runs on the audio thread, immune to main-thread
+            // congestion and AudioContext auto-suspension
+            addLog('info', 'Создаём AudioWorkletNode...');
+            const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
+            workletNodeRef.current = workletNode;
+            addLog('info', `AudioWorkletNode создан. Порог отправки: ${Math.floor(captureRate * CHUNK_DURATION_MS / 1000)} сэмплов (${CHUNK_DURATION_MS} мс)`);
 
-          // Accumulation buffer: collect native-rate chunks, then batch-send.
-          // Threshold is time-based so chunk duration stays ~100 ms regardless
-          // of AudioContext rate (e.g. 48 kHz → 4800 samples, 44.1 kHz → 4410).
-          const sendThreshold = Math.floor(captureRate * CHUNK_DURATION_MS / 1000);
-          let accumBuf: Float32Array[] = [];
-          let accumSize = 0;
+            // Accumulation buffer: collect native-rate chunks, then batch-send.
+            // Threshold is time-based so chunk duration stays ~100 ms regardless
+            // of AudioContext rate (e.g. 48 kHz → 4800 samples, 44.1 kHz → 4410).
+            const sendThreshold = Math.floor(captureRate * CHUNK_DURATION_MS / 1000);
+            let accumBuf: Float32Array[] = [];
+            let accumSize = 0;
+            let workletMsgCount = 0;
+            let chunksSent = 0;
 
-          workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-            if (ws.readyState !== WebSocket.OPEN) return;
-            const chunk = event.data;
-            accumBuf.push(chunk);
-            accumSize += chunk.length;
+            workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+              workletMsgCount++;
+              // Log first message and then every 50th to confirm data flows
+              if (workletMsgCount === 1) {
+                addLog('info', `✓ Воркрлет отправил первый фрейм (${event.data.length} сэмплов)`);
+              }
 
-            if (accumSize >= sendThreshold) {
-              // Merge accumulated chunks into one contiguous buffer
-              const merged = new Float32Array(accumSize);
-              let offset = 0;
-              for (const c of accumBuf) { merged.set(c, offset); offset += c.length; }
-              accumBuf = [];
-              accumSize = 0;
+              if (ws.readyState !== WebSocket.OPEN) return;
+              const chunk = event.data;
+              accumBuf.push(chunk);
+              accumSize += chunk.length;
 
-              const pcm16 = downsampleToInt16(merged, captureRate);
-              ws.send(JSON.stringify({
-                user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
-              }));
-            }
-          };
+              if (accumSize >= sendThreshold) {
+                // Merge accumulated chunks into one contiguous buffer
+                const merged = new Float32Array(accumSize);
+                let offset = 0;
+                for (const c of accumBuf) { merged.set(c, offset); offset += c.length; }
+                accumBuf = [];
+                accumSize = 0;
 
-          // source → analyser → workletNode (processes audio; output discarded)
-          analyser.connect(workletNode);
-          // Connect output to a silent sink so Chrome treats the graph as active
-          const sink = audioCtx.createGain();
-          sink.gain.value = 0;
-          workletNode.connect(sink);
-          sink.connect(audioCtx.destination);
+                const pcm16 = downsampleToInt16(merged, captureRate);
+                ws.send(JSON.stringify({
+                  user_audio_chunk: arrayBufferToBase64(pcm16.buffer as ArrayBuffer),
+                }));
+
+                chunksSent++;
+                if (chunksSent === 1) {
+                  addLog('info', `✓ Первый аудиочанк отправлен (${pcm16.length} сэмплов @ 16 кГц → ${pcm16.byteLength} байт)`);
+                } else if (chunksSent % 20 === 0) {
+                  addLog('info', `📤 Отправлено чанков: ${chunksSent} (воркрлет-сообщений: ${workletMsgCount})`);
+                }
+              }
+            };
+
+            workletNode.port.onmessageerror = (e) => {
+              addLog('error', `Ошибка порта воркрлета: ${String(e)}`);
+            };
+
+            // source → analyser → workletNode (processes audio; output discarded)
+            analyser.connect(workletNode);
+            // Connect output to a silent sink so Chrome treats the graph as active
+            const sink = audioCtx.createGain();
+            sink.gain.value = 0;
+            workletNode.connect(sink);
+            sink.connect(audioCtx.destination);
+
+            addLog('info', 'Аудиограф подключён — ожидаем фреймы от микрофона');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addLog('error', `Ошибка при настройке аудио в onopen: ${msg}`);
+            setCallStatus('idle');
+            cleanup();
+          }
         };
 
         ws.onmessage = (event) => {
