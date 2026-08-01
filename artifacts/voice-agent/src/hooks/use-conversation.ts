@@ -257,7 +257,14 @@ export function useConversation(appState: AppState) {
           // Connect capture graph: source → analyser → processor.
           // Processor must be connected to destination to stay active.
           analyser.connect(processor);
-          processor.connect(audioCtx.destination);
+          // Connect processor to a silenced GainNode instead of destination.
+          // ScriptProcessorNode must be connected to stay active, but routing
+          // mic audio to the speaker destination on the same context as playback
+          // triggers the browser's echo-cancellation and suppresses agent audio.
+          const sink = audioCtx.createGain();
+          sink.gain.value = 0;
+          processor.connect(sink);
+          sink.connect(audioCtx.destination);
         };
 
         ws.onmessage = (event) => {
