@@ -10,11 +10,11 @@ import type { AppState } from '@/hooks/use-app-state';
 const ELEVENLABS_SAMPLE_RATE = 16000;
 
 /**
- * How many native-rate samples to accumulate before downsampling and sending.
- * At 48 kHz → ~85 ms per chunk.  At 44100 Hz → ~93 ms.  Good balance between
- * latency and WebSocket overhead.
+ * Target chunk duration sent to ElevenLabs, in milliseconds.
+ * The actual sample count threshold is derived from the context's sample rate
+ * so chunks are consistently ~100 ms regardless of AudioContext rate.
  */
-const SEND_THRESHOLD = 4096;
+const CHUNK_DURATION_MS = 100;
 
 interface ElevenLabsMessage {
   type: string;
@@ -205,7 +205,10 @@ export function useConversation(appState: AppState) {
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-        const audioCtx = new AudioContextCtor();
+        // Force 48 kHz — the universally supported standard rate.
+        // Without this, Chrome may create a 16 kHz context on hardware that
+        // reports 16 kHz as native, causing poor resampling of mic audio.
+        const audioCtx = new AudioContextCtor({ sampleRate: 48000 });
         audioCtxRef.current = audioCtx;
         const captureRate = audioCtx.sampleRate;
 
@@ -259,7 +262,10 @@ export function useConversation(appState: AppState) {
           const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
           workletNodeRef.current = workletNode;
 
-          // Accumulation buffer: collect native-rate chunks, then batch-send
+          // Accumulation buffer: collect native-rate chunks, then batch-send.
+          // Threshold is time-based so chunk duration stays ~100 ms regardless
+          // of AudioContext rate (e.g. 48 kHz → 4800 samples, 44.1 kHz → 4410).
+          const sendThreshold = Math.floor(captureRate * CHUNK_DURATION_MS / 1000);
           let accumBuf: Float32Array[] = [];
           let accumSize = 0;
 
@@ -269,7 +275,7 @@ export function useConversation(appState: AppState) {
             accumBuf.push(chunk);
             accumSize += chunk.length;
 
-            if (accumSize >= SEND_THRESHOLD) {
+            if (accumSize >= sendThreshold) {
               // Merge accumulated chunks into one contiguous buffer
               const merged = new Float32Array(accumSize);
               let offset = 0;
