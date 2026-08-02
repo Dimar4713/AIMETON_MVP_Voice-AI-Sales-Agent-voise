@@ -44,6 +44,15 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
-.cache/
-.local/
+# Local runtime data and secrets
+.data/
+**/.data/
+.env
+.env.*
+!.env.example
+
+# Replit workspace metadata is intentionally not part of the standalone repository
+/.replit
+/.replitignore
+/replit.md
+**/.replit-artifact/
