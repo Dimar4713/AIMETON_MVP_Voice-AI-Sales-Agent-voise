@@ -15,4 +15,10 @@ export interface AgentCreateInput {
      * @maxLength 50000
      */
   serviceDescription?: string;
+  /**
+     * Original name of the uploaded service brief
+     * @maxLength 255
+     * @nullable
+     */
+  fileName?: string | null;
 }

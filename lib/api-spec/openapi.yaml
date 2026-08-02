@@ -131,6 +131,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResult"
 
+  /agent/configuration:
+    patch:
+      operationId: updateAgentConfiguration
+      tags: [agent]
+      summary: Update the current agent configuration
+      description: Updates the saved ElevenLabs agent prompt and its local configuration metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentConfigurationInput"
+      responses:
+        "200":
+          description: Agent configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStatus"
+        "400":
+          description: Error updating agent configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResult"
+
   /logs/client-event:
     post:
       operationId: logClientEvent
@@ -212,6 +238,10 @@ components:
           type: string
           maxLength: 50000
           description: Optional text extracted from the uploaded service brief
+        fileName:
+          type: ["string", "null"]
+          maxLength: 255
+          description: Original name of the uploaded service brief
 
     AgentStatus:
       type: object
@@ -221,6 +251,33 @@ components:
           type: boolean
         agentId:
           type: ["string", "null"]
+
+        salesMode:
+          type: ["string", "null"]
+          enum: [online_course, fitness_membership, crm_system, null]
+          description: Sales direction configured for the current agent
+
+        fileName:
+          type: ["string", "null"]
+          description: Name of the service description file attached to the current agent
+
+        serviceDescription:
+          type: ["string", "null"]
+          description: Text of the service description attached to the current agent
+
+    AgentConfigurationInput:
+      type: object
+      required: [salesMode]
+      properties:
+        salesMode:
+          type: string
+          enum: [online_course, fitness_membership, crm_system]
+        fileName:
+          type: ["string", "null"]
+          maxLength: 255
+        serviceDescription:
+          type: ["string", "null"]
+          maxLength: 50000
 
     SignedUrlResult:
       type: object

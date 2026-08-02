@@ -4,6 +4,7 @@ import {
   useGetSettingsStatus,
   useGetAgentStatus,
   useCreateAgent,
+  useUpdateAgentConfiguration,
   useGetSignedUrl,
   getGetSignedUrlQueryKey,
 } from '@workspace/api-client-react';
@@ -27,6 +28,7 @@ import {
   ShieldCheck,
   Upload,
   FileText,
+  Eye,
   GraduationCap,
   Dumbbell,
   BriefcaseBusiness,
@@ -91,6 +93,9 @@ export default function Dashboard() {
   const [serviceDescription, setServiceDescription] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [savedSalesMode, setSavedSalesMode] = useState<SalesMode | null>(null);
+  const [savedFileName, setSavedFileName] = useState<string | null>(null);
+  const [savedServiceDescription, setSavedServiceDescription] = useState('');
 
   const settingsStatusQuery = useGetSettingsStatus();
   const agentStatusQuery = useGetAgentStatus();
@@ -99,10 +104,34 @@ export default function Dashboard() {
     mutation: {
       onSuccess: (result) => {
         setAgentStatus({ hasAgent: true, agentId: result.agentId });
-        addLog('info', `AI-агент создан: ${result.agentId}`);
+        setSavedSalesMode(salesMode);
+        setSavedFileName(uploadedFileName);
+        setSavedServiceDescription(serviceDescription.trim());
+        addLog(
+          'info',
+          `AI-агент создан: ${result.agentId}. Файл «${uploadedFileName ?? 'без файла'}» прикреплён к этому агенту.`,
+        );
       },
       onError: (error) => {
         addLog('error', `Не удалось создать агента: ${error.message}`);
+      },
+    },
+  });
+
+  const updateAgent = useUpdateAgentConfiguration({
+    mutation: {
+      onSuccess: (result) => {
+        setAgentStatus({ hasAgent: true, agentId: result.agentId ?? null });
+        setSavedSalesMode(result.salesMode ?? salesMode);
+        setSavedFileName(result.fileName ?? null);
+        setSavedServiceDescription(result.serviceDescription ?? '');
+        addLog(
+          'info',
+          `Конфигурация текущего агента обновлена. Файл «${result.fileName ?? 'без файла'}» теперь прикреплён к ${result.agentId}.`,
+        );
+      },
+      onError: (error) => {
+        addLog('error', `Не удалось обновить текущего агента: ${error.message}`);
       },
     },
   });
@@ -127,6 +156,19 @@ export default function Dashboard() {
         hasAgent: agentStatusQuery.data.hasAgent,
         agentId: agentStatusQuery.data.agentId ?? null,
       });
+      if (agentStatusQuery.data.hasAgent) {
+        const configuredMode = agentStatusQuery.data.salesMode ?? null;
+        const configuredFileName = agentStatusQuery.data.fileName ?? null;
+        const configuredDescription =
+          agentStatusQuery.data.serviceDescription ?? '';
+
+        setSavedSalesMode(configuredMode);
+        setSavedFileName(configuredFileName);
+        setSavedServiceDescription(configuredDescription);
+        setSalesMode(configuredMode ?? AgentCreateInputSalesMode.crm_system);
+        setUploadedFileName(configuredFileName);
+        setServiceDescription(configuredDescription);
+      }
     }
   }, [agentStatusQuery.data, setAgentStatus]);
 
@@ -158,7 +200,12 @@ export default function Dashboard() {
   };
 
   const handleCreateAgent = () => {
-    if (!keyStatus.keySaved || createAgent.isPending) return;
+    if (
+      !keyStatus.keySaved ||
+      createAgent.isPending ||
+      updateAgent.isPending
+    )
+      return;
     addLog(
       'info',
       `Создаём AI-агента продаж: ${salesModeLabels[salesMode].title}...`,
@@ -166,9 +213,32 @@ export default function Dashboard() {
     createAgent.mutate({
       data: {
         salesMode,
+        fileName: uploadedFileName,
         ...(serviceDescription.trim()
           ? { serviceDescription: serviceDescription.trim() }
           : {}),
+      },
+    });
+  };
+
+  const handleUpdateAgent = () => {
+    if (
+      !keyStatus.keySaved ||
+      !agentStatus.hasAgent ||
+      createAgent.isPending ||
+      updateAgent.isPending
+    )
+      return;
+
+    addLog(
+      'info',
+      `Обновляем текущего агента ${agentStatus.agentId ?? ''}: ${salesModeLabels[salesMode].title}...`,
+    );
+    updateAgent.mutate({
+      data: {
+        salesMode,
+        fileName: uploadedFileName,
+        serviceDescription: serviceDescription.trim() || null,
       },
     });
   };
@@ -226,6 +296,8 @@ export default function Dashboard() {
     setFileError(null);
   };
 
+  const isAgentMutationPending =
+    createAgent.isPending || updateAgent.isPending;
   const callMeta = callStatusMeta[callStatus];
 
   return (
@@ -381,6 +453,72 @@ export default function Dashboard() {
                 </Button>
               </div>
 
+              {agentStatus.hasAgent && (
+                <div className="mt-5 rounded-xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">
+                        Текущая конфигурация агента
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Этот файл и режим уже применены именно к текущему агенту.
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-primary/30 bg-primary/10 text-[hsl(var(--primary))]"
+                    >
+                      Активен
+                    </Badge>
+                  </div>
+
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg border border-card-border bg-background/40 px-3 py-2.5">
+                      <span className="block text-muted-foreground">ID агента</span>
+                      <span className="mt-1 block break-all font-mono text-[11px]">
+                        {agentStatus.agentId}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-card-border bg-background/40 px-3 py-2.5">
+                      <span className="block text-muted-foreground">
+                        Направление
+                      </span>
+                      <span className="mt-1 block font-medium">
+                        {savedSalesMode
+                          ? salesModeLabels[savedSalesMode].title
+                          : 'Не указано'}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-card-border bg-background/40 px-3 py-2.5 sm:col-span-2">
+                      <span className="block text-muted-foreground">
+                        Прикреплённый файл
+                      </span>
+                      <span className="mt-1 flex items-center gap-2 font-medium">
+                        <FileText className="h-3.5 w-3.5 text-[hsl(var(--primary))]" />
+                        {savedFileName ?? 'Файл не прикреплён'}
+                        {savedServiceDescription && (
+                          <span className="font-normal text-muted-foreground">
+                            · {savedServiceDescription.length.toLocaleString('ru-RU')} симв.
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {savedServiceDescription && (
+                    <details className="mt-3 rounded-lg border border-card-border bg-background/40">
+                      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+                        <Eye className="h-3.5 w-3.5" />
+                        Посмотреть прикреплённое описание
+                      </summary>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-card-border px-3 py-3 font-sans text-xs leading-relaxed text-muted-foreground">
+                        {savedServiceDescription}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+
               <Separator className="my-5" />
 
               <div className="mb-5 rounded-xl border border-card-border bg-background/35 p-4 sm:p-5">
@@ -456,7 +594,7 @@ export default function Dashboard() {
                         accept=".txt,.md,.csv,.json,.html,.htm,text/plain,text/markdown,text/csv,application/json,text/html"
                         className="sr-only"
                         onChange={handleServiceFile}
-                        disabled={createAgent.isPending}
+                        disabled={isAgentMutationPending}
                       />
                     </label>
                   </div>
@@ -503,17 +641,38 @@ export default function Dashboard() {
                 variant="secondary"
                 size="lg"
                 onClick={handleCreateAgent}
-                disabled={!keyStatus.keySaved || createAgent.isPending}
+                disabled={!keyStatus.keySaved || isAgentMutationPending}
                 className="h-12 w-full text-sm font-medium"
                 data-testid="button-create-agent"
               >
-                {createAgent.isPending ? (
+                {isAgentMutationPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
                 Создать AI-агента для выбранного направления
               </Button>
+              {agentStatus.hasAgent && (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={handleUpdateAgent}
+                  disabled={
+                    !keyStatus.keySaved ||
+                    isAgentMutationPending ||
+                    !agentStatus.agentId
+                  }
+                  className="mt-2 h-11 w-full text-sm font-medium"
+                  data-testid="button-update-agent"
+                >
+                  {updateAgent.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4" />
+                  )}
+                  Обновить текущего агента
+                </Button>
+              )}
             </div>
 
             {/* Status rail */}

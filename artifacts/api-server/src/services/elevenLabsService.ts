@@ -101,3 +101,33 @@ export async function getSignedConversationUrl(
   logger.info("Signed conversation URL obtained");
   return result.signed_url;
 }
+
+export async function updateSalesAgent(
+  apiKey: string,
+  agentId: string,
+  salesMode: SalesMode,
+  serviceDescription?: string | null,
+): Promise<void> {
+  const product = getProductConfig(salesMode);
+  const systemPrompt = buildSystemPrompt(product, serviceDescription ?? undefined);
+
+  await elevenLabsRequest(
+    "PATCH",
+    `/convai/agents/${encodeURIComponent(agentId)}`,
+    apiKey,
+    {
+      name: `AI Sales Agent — ${product.name}`,
+      conversation_config: {
+        agent: {
+          prompt: {
+            prompt: systemPrompt,
+          },
+          first_message: `Добрый день! Меня зовут Алекс, я AI-ассистент компании. Удобно ли вам сейчас поговорить пару минут? Я хотел бы узнать, ${salesMode === "online_course" ? "какие навыки вы хотите развить" : salesMode === "fitness_membership" ? "каких результатов в тренировках вы хотите достичь" : "как вы сейчас управляете своими клиентами и продажами"}.`,
+          language: "ru",
+        },
+      },
+      version_description: "Обновлена конфигурация продаж",
+    },
+  );
+  logger.info({ agentId }, "ElevenLabs sales agent updated");
+}

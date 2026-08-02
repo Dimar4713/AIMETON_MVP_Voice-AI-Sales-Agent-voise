@@ -50,11 +50,14 @@ export const GetSettingsStatusResponse = zod.object({
  */
 export const createAgentBodyServiceDescriptionMax = 50000;
 
+export const createAgentBodyFileNameMax = 255;
+
 
 
 export const CreateAgentBody = zod.object({
   "salesMode": zod.enum(['online_course', 'fitness_membership', 'crm_system']).describe('Sales direction used to configure the agent'),
-  "serviceDescription": zod.string().max(createAgentBodyServiceDescriptionMax).optional().describe('Optional text extracted from the uploaded service brief')
+  "serviceDescription": zod.string().max(createAgentBodyServiceDescriptionMax).optional().describe('Optional text extracted from the uploaded service brief'),
+  "fileName": zod.string().max(createAgentBodyFileNameMax).nullish().describe('Original name of the uploaded service brief')
 })
 
 export const CreateAgentResponse = zod.object({
@@ -70,7 +73,10 @@ export const CreateAgentResponse = zod.object({
  */
 export const GetAgentStatusResponse = zod.object({
   "hasAgent": zod.boolean(),
-  "agentId": zod.string().nullish()
+  "agentId": zod.string().nullish(),
+  "salesMode": zod.union([zod.literal('online_course'),zod.literal('fitness_membership'),zod.literal('crm_system'),zod.literal(null)]).nullish().describe('Sales direction configured for the current agent'),
+  "fileName": zod.string().nullish().describe('Name of the service description file attached to the current agent'),
+  "serviceDescription": zod.string().nullish().describe('Text of the service description attached to the current agent')
 })
 
 
@@ -80,6 +86,31 @@ export const GetAgentStatusResponse = zod.object({
  */
 export const GetSignedUrlResponse = zod.object({
   "signedUrl": zod.string().describe('Signed WebSocket URL for ElevenLabs conversation')
+})
+
+
+/**
+ * Updates the saved ElevenLabs agent prompt and its local configuration metadata
+ * @summary Update the current agent configuration
+ */
+export const updateAgentConfigurationBodyFileNameMax = 255;
+
+export const updateAgentConfigurationBodyServiceDescriptionMax = 50000;
+
+
+
+export const UpdateAgentConfigurationBody = zod.object({
+  "salesMode": zod.enum(['online_course', 'fitness_membership', 'crm_system']),
+  "fileName": zod.string().max(updateAgentConfigurationBodyFileNameMax).nullish(),
+  "serviceDescription": zod.string().max(updateAgentConfigurationBodyServiceDescriptionMax).nullish()
+})
+
+export const UpdateAgentConfigurationResponse = zod.object({
+  "hasAgent": zod.boolean(),
+  "agentId": zod.string().nullish(),
+  "salesMode": zod.union([zod.literal('online_course'),zod.literal('fitness_membership'),zod.literal('crm_system'),zod.literal(null)]).nullish().describe('Sales direction configured for the current agent'),
+  "fileName": zod.string().nullish().describe('Name of the service description file attached to the current agent'),
+  "serviceDescription": zod.string().nullish().describe('Text of the service description attached to the current agent')
 })
 
 

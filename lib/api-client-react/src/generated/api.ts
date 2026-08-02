@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AgentConfigurationInput,
   AgentCreateInput,
   AgentCreateResult,
   AgentStatus,
@@ -515,6 +516,78 @@ export function useGetSignedUrl<TData = Awaited<ReturnType<typeof getSignedUrl>>
 
 
 
+
+export const getUpdateAgentConfigurationUrl = () => {
+
+
+
+
+  return `/api/agent/configuration`
+}
+
+/**
+ * Updates the saved ElevenLabs agent prompt and its local configuration metadata
+ * @summary Update the current agent configuration
+ */
+export const updateAgentConfiguration = async (agentConfigurationInput: AgentConfigurationInput, options?: Parameters<typeof customFetch>[1]): Promise<AgentStatus> => {
+
+  return customFetch<AgentStatus>(getUpdateAgentConfigurationUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentConfigurationInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateAgentConfigurationMutationOptions = <TError = ErrorType<ErrorResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgentConfiguration>>, TError,{data: BodyType<AgentConfigurationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAgentConfiguration>>, TError,{data: BodyType<AgentConfigurationInput>}, TContext> => {
+
+const mutationKey = ['updateAgentConfiguration'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAgentConfiguration>>, {data: BodyType<AgentConfigurationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateAgentConfiguration(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAgentConfigurationMutationResult = NonNullable<Awaited<ReturnType<typeof updateAgentConfiguration>>>
+    export type UpdateAgentConfigurationMutationBody = BodyType<AgentConfigurationInput>
+    export type UpdateAgentConfigurationMutationError = ErrorType<ErrorResult>
+
+    /**
+ * @summary Update the current agent configuration
+ */
+export const useUpdateAgentConfiguration = <TError = ErrorType<ErrorResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgentConfiguration>>, TError,{data: BodyType<AgentConfigurationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAgentConfiguration>>,
+        TError,
+        {data: BodyType<AgentConfigurationInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateAgentConfigurationMutationOptions(options));
+    }
 
 export const getLogClientEventUrl = () => {
 
