@@ -1,2 +1,3 @@
 - [Voice input compatibility](voice-input-compatibility.md) — для текущего ConvAI-потока рабочей оказалась нативная ScriptProcessor-схема; переход на Worklet нарушил распознавание.
 - [Sales mode agent routing](sales-mode-agent-routing.md) — каждое направление продаж имеет отдельный ElevenLabs agentId; signed URL всегда запрашивается с выбранным режимом.
+- [Agent status cache](agent-status-cache.md) — после создания агента обновляй React Query cache статуса, иначе старый status response может стереть новый ID из карточки.

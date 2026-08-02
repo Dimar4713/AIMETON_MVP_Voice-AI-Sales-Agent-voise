@@ -1,6 +1,8 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   type AgentConfiguration,
+  type AgentStatus,
   AgentCreateInputSalesMode,
   useGetSettingsStatus,
   useGetAgentStatus,
@@ -103,6 +105,22 @@ export default function Dashboard() {
 
   const settingsStatusQuery = useGetSettingsStatus();
   const agentStatusQuery = useGetAgentStatus();
+  const queryClient = useQueryClient();
+
+  const updateAgentStatusCache = (configuration: AgentConfiguration) => {
+    queryClient.setQueryData<AgentStatus>(
+      ['/api/agent/status'],
+      (current) => ({
+        hasAgent: true,
+        agents: [
+          ...(current?.agents ?? []).filter(
+            (agent) => agent.salesMode !== configuration.salesMode,
+          ),
+          configuration,
+        ],
+      }),
+    );
+  };
 
   const createAgent = useCreateAgent({
     mutation: {
@@ -114,6 +132,7 @@ export default function Dashboard() {
           fileName: uploadedFileName,
           serviceDescription: serviceDescription.trim() || null,
         };
+        updateAgentStatusCache(configuration);
         setAgentConfigurations((previous) => ({
           ...previous,
           [salesMode]: configuration,
@@ -143,6 +162,7 @@ export default function Dashboard() {
             fileName: result.fileName ?? null,
             serviceDescription: result.serviceDescription ?? null,
           };
+          updateAgentStatusCache(configuration);
           setAgentConfigurations((previous) => ({
             ...previous,
             [result.salesMode as SalesMode]: configuration,
@@ -155,6 +175,7 @@ export default function Dashboard() {
           'info',
           `Конфигурация текущего агента обновлена. Файл «${result.fileName ?? 'без файла'}» теперь прикреплён к ${result.agentId}.`,
         );
+        void agentStatusQuery.refetch();
       },
       onError: (error) => {
         addLog('error', `Не удалось обновить текущего агента: ${error.message}`);
