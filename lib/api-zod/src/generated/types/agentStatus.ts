@@ -5,25 +5,9 @@
  * Voice AI Sales Agent API
  * OpenAPI spec version: 0.1.0
  */
-import type { AgentStatusSalesMode } from './agentStatusSalesMode';
+import type { AgentConfiguration } from './agentConfiguration';
 
 export interface AgentStatus {
   hasAgent: boolean;
-  /** @nullable */
-  agentId?: string | null;
-  /**
-     * Sales direction configured for the current agent
-     * @nullable
-     */
-  salesMode?: AgentStatusSalesMode;
-  /**
-     * Name of the service description file attached to the current agent
-     * @nullable
-     */
-  fileName?: string | null;
-  /**
-     * Text of the service description attached to the current agent
-     * @nullable
-     */
-  serviceDescription?: string | null;
+  agents?: AgentConfiguration[];
 }

@@ -7,7 +7,7 @@ import {
   UpdateAgentConfigurationResponse,
 } from "@workspace/api-zod";
 import { getApiKey } from "../services/settingsStore";
-import { getAgentData, saveAgentId, getAgentId } from "../services/agentStore";
+import { getAgents, getAgent, saveAgent } from "../services/agentStore";
 import { createSalesAgent, updateSalesAgent } from "../services/elevenLabsService";
 
 const router: IRouter = Router();
@@ -31,8 +31,7 @@ router.post("/agent/create", async (req, res): Promise<void> => {
     input.serviceDescription,
   );
 
-  await saveAgentId(agentId, {
-    salesMode: input.salesMode,
+  await saveAgent(input.salesMode, agentId, {
     fileName: input.fileName,
     serviceDescription: input.serviceDescription ?? null,
   });
@@ -49,19 +48,15 @@ router.post("/agent/create", async (req, res): Promise<void> => {
 });
 
 router.get("/agent/status", async (req, res): Promise<void> => {
-  const data = await getAgentData();
-  const agentExists = Boolean(data.agentId);
-  const agentId = data.agentId ?? null;
+  const data = await getAgents();
+  const agents = Object.values(data.agents);
 
-  req.log.info({ hasAgent: agentExists }, "Agent status requested");
+  req.log.info({ agentCount: agents.length }, "Agent status requested");
 
   res.json(
     GetAgentStatusResponse.parse({
-      hasAgent: agentExists,
-      agentId: agentId ?? null,
-      salesMode: data.salesMode ?? null,
-      fileName: data.fileName ?? null,
-      serviceDescription: data.serviceDescription ?? null,
+      hasAgent: agents.length > 0,
+      agents,
     }),
   );
 });
@@ -75,33 +70,34 @@ router.patch("/agent/configuration", async (req, res): Promise<void> => {
     return;
   }
 
-  const agentId = await getAgentId();
-  if (!agentId) {
-    res.status(400).json({ error: "AI agent not created yet." });
+  const input = UpdateAgentConfigurationBody.parse(req.body);
+  const existingAgent = await getAgent(input.salesMode);
+  if (!existingAgent) {
+    res.status(400).json({
+      error: `AI agent for ${input.salesMode} has not been created yet.`,
+    });
     return;
   }
 
-  const input = UpdateAgentConfigurationBody.parse(req.body);
   await updateSalesAgent(
     apiKey,
-    agentId,
+    existingAgent.agentId,
     input.salesMode,
     input.serviceDescription,
   );
-  await saveAgentId(agentId, {
-    salesMode: input.salesMode,
+  await saveAgent(input.salesMode, existingAgent.agentId, {
     fileName: input.fileName,
-    serviceDescription: input.serviceDescription,
+    serviceDescription: input.serviceDescription ?? null,
   });
 
-  const data = await getAgentData();
+  const updatedAgent = await getAgent(input.salesMode);
   res.json(
     UpdateAgentConfigurationResponse.parse({
       hasAgent: true,
-      agentId,
-      salesMode: data.salesMode ?? null,
-      fileName: data.fileName ?? null,
-      serviceDescription: data.serviceDescription ?? null,
+      agentId: updatedAgent?.agentId ?? null,
+      salesMode: updatedAgent?.salesMode ?? null,
+      fileName: updatedAgent?.fileName ?? null,
+      serviceDescription: updatedAgent?.serviceDescription ?? null,
     }),
   );
 });

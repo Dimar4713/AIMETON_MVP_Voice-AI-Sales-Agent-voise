@@ -65,38 +65,27 @@ export interface AgentCreateInput {
   fileName?: string | null;
 }
 
-/**
- * Sales direction configured for the current agent
- * @nullable
- */
-export type AgentStatusSalesMode = typeof AgentStatusSalesMode[keyof typeof AgentStatusSalesMode] | null;
+export type AgentConfigurationSalesMode = typeof AgentConfigurationSalesMode[keyof typeof AgentConfigurationSalesMode];
 
 
-export const AgentStatusSalesMode = {
+export const AgentConfigurationSalesMode = {
   online_course: 'online_course',
   fitness_membership: 'fitness_membership',
   crm_system: 'crm_system',
 } as const;
 
+export interface AgentConfiguration {
+  agentId: string;
+  salesMode: AgentConfigurationSalesMode;
+  /** @nullable */
+  fileName?: string | null;
+  /** @nullable */
+  serviceDescription?: string | null;
+}
+
 export interface AgentStatus {
   hasAgent: boolean;
-  /** @nullable */
-  agentId?: string | null;
-  /**
-     * Sales direction configured for the current agent
-     * @nullable
-     */
-  salesMode?: AgentStatusSalesMode;
-  /**
-     * Name of the service description file attached to the current agent
-     * @nullable
-     */
-  fileName?: string | null;
-  /**
-     * Text of the service description attached to the current agent
-     * @nullable
-     */
-  serviceDescription?: string | null;
+  agents?: AgentConfiguration[];
 }
 
 export type AgentConfigurationInputSalesMode = typeof AgentConfigurationInputSalesMode[keyof typeof AgentConfigurationInputSalesMode];
@@ -119,6 +108,30 @@ export interface AgentConfigurationInput {
      * @maxLength 50000
      * @nullable
      */
+  serviceDescription?: string | null;
+}
+
+/**
+ * @nullable
+ */
+export type UpdateAgentConfigurationResultSalesMode = typeof UpdateAgentConfigurationResultSalesMode[keyof typeof UpdateAgentConfigurationResultSalesMode] | null;
+
+
+export const UpdateAgentConfigurationResultSalesMode = {
+  online_course: 'online_course',
+  fitness_membership: 'fitness_membership',
+  crm_system: 'crm_system',
+} as const;
+
+export interface UpdateAgentConfigurationResult {
+  hasAgent: boolean;
+  /** @nullable */
+  agentId?: string | null;
+  /** @nullable */
+  salesMode?: UpdateAgentConfigurationResultSalesMode;
+  /** @nullable */
+  fileName?: string | null;
+  /** @nullable */
   serviceDescription?: string | null;
 }
 
@@ -153,4 +166,17 @@ export interface LogResult {
 export interface ErrorResult {
   error: string;
 }
+
+export type GetSignedUrlParams = {
+salesMode: GetSignedUrlSalesMode;
+};
+
+export type GetSignedUrlSalesMode = typeof GetSignedUrlSalesMode[keyof typeof GetSignedUrlSalesMode];
+
+
+export const GetSignedUrlSalesMode = {
+  online_course: 'online_course',
+  fitness_membership: 'fitness_membership',
+  crm_system: 'crm_system',
+} as const;
 

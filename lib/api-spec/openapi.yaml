@@ -102,7 +102,7 @@ paths:
       operationId: getAgentStatus
       tags: [agent]
       summary: Get agent status
-      description: Returns whether an agent has been created and its ID
+      description: Returns all configured agents, one per sales direction
       responses:
         "200":
           description: Agent status
@@ -116,7 +116,14 @@ paths:
       operationId: getSignedUrl
       tags: [conversation]
       summary: Get signed URL for conversation
-      description: Server-side fetches a signed WebSocket URL from ElevenLabs for the saved agent
+      description: Server-side fetches a signed WebSocket URL for the selected sales direction
+      parameters:
+        - name: salesMode
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [online_course, fitness_membership, crm_system]
       responses:
         "200":
           description: Signed URL
@@ -149,7 +156,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentStatus"
+                $ref: "#/components/schemas/UpdateAgentConfigurationResult"
         "400":
           description: Error updating agent configuration
           content:
@@ -249,21 +256,24 @@ components:
       properties:
         hasAgent:
           type: boolean
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentConfiguration"
+
+    AgentConfiguration:
+      type: object
+      required: [agentId, salesMode]
+      properties:
         agentId:
-          type: ["string", "null"]
-
+          type: string
         salesMode:
-          type: ["string", "null"]
-          enum: [online_course, fitness_membership, crm_system, null]
-          description: Sales direction configured for the current agent
-
+          type: string
+          enum: [online_course, fitness_membership, crm_system]
         fileName:
           type: ["string", "null"]
-          description: Name of the service description file attached to the current agent
-
         serviceDescription:
           type: ["string", "null"]
-          description: Text of the service description attached to the current agent
 
     AgentConfigurationInput:
       type: object
@@ -278,6 +288,22 @@ components:
         serviceDescription:
           type: ["string", "null"]
           maxLength: 50000
+
+    UpdateAgentConfigurationResult:
+      type: object
+      required: [hasAgent]
+      properties:
+        hasAgent:
+          type: boolean
+        agentId:
+          type: ["string", "null"]
+        salesMode:
+          type: ["string", "null"]
+          enum: [online_course, fitness_membership, crm_system, null]
+        fileName:
+          type: ["string", "null"]
+        serviceDescription:
+          type: ["string", "null"]
 
     SignedUrlResult:
       type: object

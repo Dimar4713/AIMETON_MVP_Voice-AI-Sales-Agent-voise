@@ -68,22 +68,28 @@ export const CreateAgentResponse = zod.object({
 
 
 /**
- * Returns whether an agent has been created and its ID
+ * Returns all configured agents, one per sales direction
  * @summary Get agent status
  */
 export const GetAgentStatusResponse = zod.object({
   "hasAgent": zod.boolean(),
-  "agentId": zod.string().nullish(),
-  "salesMode": zod.union([zod.literal('online_course'),zod.literal('fitness_membership'),zod.literal('crm_system'),zod.literal(null)]).nullish().describe('Sales direction configured for the current agent'),
-  "fileName": zod.string().nullish().describe('Name of the service description file attached to the current agent'),
-  "serviceDescription": zod.string().nullish().describe('Text of the service description attached to the current agent')
+  "agents": zod.array(zod.object({
+  "agentId": zod.string(),
+  "salesMode": zod.enum(['online_course', 'fitness_membership', 'crm_system']),
+  "fileName": zod.string().nullish(),
+  "serviceDescription": zod.string().nullish()
+})).optional()
 })
 
 
 /**
- * Server-side fetches a signed WebSocket URL from ElevenLabs for the saved agent
+ * Server-side fetches a signed WebSocket URL for the selected sales direction
  * @summary Get signed URL for conversation
  */
+export const GetSignedUrlQueryParams = zod.object({
+  "salesMode": zod.enum(['online_course', 'fitness_membership', 'crm_system'])
+})
+
 export const GetSignedUrlResponse = zod.object({
   "signedUrl": zod.string().describe('Signed WebSocket URL for ElevenLabs conversation')
 })
@@ -108,9 +114,9 @@ export const UpdateAgentConfigurationBody = zod.object({
 export const UpdateAgentConfigurationResponse = zod.object({
   "hasAgent": zod.boolean(),
   "agentId": zod.string().nullish(),
-  "salesMode": zod.union([zod.literal('online_course'),zod.literal('fitness_membership'),zod.literal('crm_system'),zod.literal(null)]).nullish().describe('Sales direction configured for the current agent'),
-  "fileName": zod.string().nullish().describe('Name of the service description file attached to the current agent'),
-  "serviceDescription": zod.string().nullish().describe('Text of the service description attached to the current agent')
+  "salesMode": zod.union([zod.literal('online_course'),zod.literal('fitness_membership'),zod.literal('crm_system'),zod.literal(null)]).nullish(),
+  "fileName": zod.string().nullish(),
+  "serviceDescription": zod.string().nullish()
 })
 
 

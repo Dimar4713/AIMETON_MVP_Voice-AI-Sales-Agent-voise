@@ -27,11 +27,13 @@ import type {
   ApiKeyInput,
   ClientEventInput,
   ErrorResult,
+  GetSignedUrlParams,
   HealthStatus,
   LogResult,
   SaveKeyResult,
   SettingsStatus,
-  SignedUrlResult
+  SignedUrlResult,
+  UpdateAgentConfigurationResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -370,7 +372,7 @@ export const getGetAgentStatusUrl = () => {
 }
 
 /**
- * Returns whether an agent has been created and its ID
+ * Returns all configured agents, one per sales direction
  * @summary Get agent status
  */
 export const getAgentStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<AgentStatus> => {
@@ -439,21 +441,28 @@ export function useGetAgentStatus<TData = Awaited<ReturnType<typeof getAgentStat
 
 
 
-export const getGetSignedUrlUrl = () => {
+export const getGetSignedUrlUrl = (params: GetSignedUrlParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/conversation/signed-url`
+  return stringifiedParams.length > 0 ? `/api/conversation/signed-url?${stringifiedParams}` : `/api/conversation/signed-url`
 }
 
 /**
- * Server-side fetches a signed WebSocket URL from ElevenLabs for the saved agent
+ * Server-side fetches a signed WebSocket URL for the selected sales direction
  * @summary Get signed URL for conversation
  */
-export const getSignedUrl = async ( options?: Parameters<typeof customFetch>[1]): Promise<SignedUrlResult> => {
+export const getSignedUrl = async (params: GetSignedUrlParams, options?: Parameters<typeof customFetch>[1]): Promise<SignedUrlResult> => {
 
-  return customFetch<SignedUrlResult>(getGetSignedUrlUrl(),
+  return customFetch<SignedUrlResult>(getGetSignedUrlUrl(params),
   {
     ...options,
     method: 'GET'
@@ -466,23 +475,23 @@ export const getSignedUrl = async ( options?: Parameters<typeof customFetch>[1])
 
 
 
-export const getGetSignedUrlQueryKey = () => {
+export const getGetSignedUrlQueryKey = (params?: GetSignedUrlParams,) => {
     return [
-    `/api/conversation/signed-url`
+    `/api/conversation/signed-url`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetSignedUrlQueryOptions = <TData = Awaited<ReturnType<typeof getSignedUrl>>, TError = ErrorType<ErrorResult>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSignedUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetSignedUrlQueryOptions = <TData = Awaited<ReturnType<typeof getSignedUrl>>, TError = ErrorType<ErrorResult>>(params: GetSignedUrlParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSignedUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetSignedUrlQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetSignedUrlQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignedUrl>>> = ({ signal }) => getSignedUrl({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignedUrl>>> = ({ signal }) => getSignedUrl(params, { signal, ...requestOptions });
 
 
 
@@ -500,11 +509,11 @@ export type GetSignedUrlQueryError = ErrorType<ErrorResult>
  */
 
 export function useGetSignedUrl<TData = Awaited<ReturnType<typeof getSignedUrl>>, TError = ErrorType<ErrorResult>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSignedUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params: GetSignedUrlParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSignedUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetSignedUrlQueryOptions(options)
+  const queryOptions = getGetSignedUrlQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -529,9 +538,9 @@ export const getUpdateAgentConfigurationUrl = () => {
  * Updates the saved ElevenLabs agent prompt and its local configuration metadata
  * @summary Update the current agent configuration
  */
-export const updateAgentConfiguration = async (agentConfigurationInput: AgentConfigurationInput, options?: Parameters<typeof customFetch>[1]): Promise<AgentStatus> => {
+export const updateAgentConfiguration = async (agentConfigurationInput: AgentConfigurationInput, options?: Parameters<typeof customFetch>[1]): Promise<UpdateAgentConfigurationResult> => {
 
-  return customFetch<AgentStatus>(getUpdateAgentConfigurationUrl(),
+  return customFetch<UpdateAgentConfigurationResult>(getUpdateAgentConfigurationUrl(),
   {
     ...options,
     method: 'PATCH',

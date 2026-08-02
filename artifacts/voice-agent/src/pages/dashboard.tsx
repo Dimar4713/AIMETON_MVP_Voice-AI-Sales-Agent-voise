@@ -1,5 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import {
+  type AgentConfiguration,
   AgentCreateInputSalesMode,
   useGetSettingsStatus,
   useGetAgentStatus,
@@ -96,6 +97,9 @@ export default function Dashboard() {
   const [savedSalesMode, setSavedSalesMode] = useState<SalesMode | null>(null);
   const [savedFileName, setSavedFileName] = useState<string | null>(null);
   const [savedServiceDescription, setSavedServiceDescription] = useState('');
+  const [agentConfigurations, setAgentConfigurations] = useState<
+    Partial<Record<SalesMode, AgentConfiguration>>
+  >({});
 
   const settingsStatusQuery = useGetSettingsStatus();
   const agentStatusQuery = useGetAgentStatus();
@@ -104,6 +108,16 @@ export default function Dashboard() {
     mutation: {
       onSuccess: (result) => {
         setAgentStatus({ hasAgent: true, agentId: result.agentId });
+        const configuration: AgentConfiguration = {
+          agentId: result.agentId,
+          salesMode,
+          fileName: uploadedFileName,
+          serviceDescription: serviceDescription.trim() || null,
+        };
+        setAgentConfigurations((previous) => ({
+          ...previous,
+          [salesMode]: configuration,
+        }));
         setSavedSalesMode(salesMode);
         setSavedFileName(uploadedFileName);
         setSavedServiceDescription(serviceDescription.trim());
@@ -122,6 +136,18 @@ export default function Dashboard() {
     mutation: {
       onSuccess: (result) => {
         setAgentStatus({ hasAgent: true, agentId: result.agentId ?? null });
+        if (result.agentId && result.salesMode) {
+          const configuration: AgentConfiguration = {
+            agentId: result.agentId,
+            salesMode: result.salesMode,
+            fileName: result.fileName ?? null,
+            serviceDescription: result.serviceDescription ?? null,
+          };
+          setAgentConfigurations((previous) => ({
+            ...previous,
+            [result.salesMode as SalesMode]: configuration,
+          }));
+        }
         setSavedSalesMode(result.salesMode ?? salesMode);
         setSavedFileName(result.fileName ?? null);
         setSavedServiceDescription(result.serviceDescription ?? '');
@@ -136,9 +162,15 @@ export default function Dashboard() {
     },
   });
 
-  const signedUrlQuery = useGetSignedUrl({
-    query: { enabled: false, queryKey: getGetSignedUrlQueryKey() },
-  });
+  const signedUrlQuery = useGetSignedUrl(
+    { salesMode },
+    {
+      query: {
+        enabled: false,
+        queryKey: getGetSignedUrlQueryKey({ salesMode }),
+      },
+    },
+  );
 
   // Sync server-fetched settings/agent status into local app state once loaded.
   useEffect(() => {
@@ -152,32 +184,56 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (agentStatusQuery.data) {
-      setAgentStatus({
-        hasAgent: agentStatusQuery.data.hasAgent,
-        agentId: agentStatusQuery.data.agentId ?? null,
-      });
-      if (agentStatusQuery.data.hasAgent) {
-        const configuredMode = agentStatusQuery.data.salesMode ?? null;
-        const configuredFileName = agentStatusQuery.data.fileName ?? null;
-        const configuredDescription =
-          agentStatusQuery.data.serviceDescription ?? '';
+      const configurations = Object.fromEntries(
+        (agentStatusQuery.data.agents ?? []).map((configuration) => [
+          configuration.salesMode,
+          configuration,
+        ]),
+      ) as Partial<Record<SalesMode, AgentConfiguration>>;
+      const selectedConfiguration = configurations[salesMode];
 
-        setSavedSalesMode(configuredMode);
-        setSavedFileName(configuredFileName);
-        setSavedServiceDescription(configuredDescription);
-        setSalesMode(configuredMode ?? AgentCreateInputSalesMode.crm_system);
-        setUploadedFileName(configuredFileName);
-        setServiceDescription(configuredDescription);
-      }
+      setAgentConfigurations(configurations);
+      setAgentStatus({
+        hasAgent: Boolean(selectedConfiguration?.agentId),
+        agentId: selectedConfiguration?.agentId ?? null,
+      });
+      setSavedSalesMode(selectedConfiguration?.salesMode ?? salesMode);
+      setSavedFileName(selectedConfiguration?.fileName ?? null);
+      setSavedServiceDescription(selectedConfiguration?.serviceDescription ?? '');
+      setUploadedFileName(selectedConfiguration?.fileName ?? null);
+      setServiceDescription(selectedConfiguration?.serviceDescription ?? '');
     }
-  }, [agentStatusQuery.data, setAgentStatus]);
+  }, [agentStatusQuery.data, salesMode, setAgentStatus]);
+
+  const selectSalesMode = (mode: SalesMode) => {
+    if (isCallBusy || isAgentMutationPending) return;
+
+    const configuration = agentConfigurations[mode];
+    setSalesMode(mode);
+    setAgentStatus({
+      hasAgent: Boolean(configuration?.agentId),
+      agentId: configuration?.agentId ?? null,
+    });
+    setSavedSalesMode(configuration?.salesMode ?? mode);
+    setSavedFileName(configuration?.fileName ?? null);
+    setSavedServiceDescription(configuration?.serviceDescription ?? '');
+    setUploadedFileName(configuration?.fileName ?? null);
+    setServiceDescription(configuration?.serviceDescription ?? '');
+    setFileError(null);
+    addLog(
+      configuration?.agentId ? 'info' : 'warn',
+      configuration?.agentId
+        ? `Выбран агент ${configuration.agentId} для направления «${salesModeLabels[mode].title}».`
+        : `Для направления «${salesModeLabels[mode].title}» агент ещё не создан.`,
+    );
+  };
 
   const isCallActive = callStatus === 'active';
   const isCallBusy = callStatus !== 'idle';
   const showWelcome = !keyStatus.keySaved || !agentStatus.hasAgent;
 
   const handleCall = async () => {
-    if (!agentStatus.hasAgent || isCallBusy) return;
+    if (!agentStatus.hasAgent || !agentStatus.agentId || isCallBusy) return;
     addLog('info', 'Запрашиваем защищённую ссылку для звонка...');
     try {
       const result = await signedUrlQuery.refetch();
@@ -225,6 +281,7 @@ export default function Dashboard() {
     if (
       !keyStatus.keySaved ||
       !agentStatus.hasAgent ||
+      !agentStatus.agentId ||
       createAgent.isPending ||
       updateAgent.isPending
     )
@@ -525,8 +582,8 @@ export default function Dashboard() {
                 <div className="mb-4">
                   <p className="text-sm font-semibold">Направление продаж</p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Выберите, что агент будет продавать. Настройка применяется при
-                    создании нового агента.
+                    Выберите направление звонка. Для каждого направления хранится
+                    свой агент, ID и описание услуги.
                   </p>
                 </div>
 
@@ -538,7 +595,7 @@ export default function Dashboard() {
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => setSalesMode(option.value)}
+                        onClick={() => selectSalesMode(option.value)}
                         className={cn(
                           'rounded-lg border px-3 py-3 text-left transition-colors',
                           selected
@@ -561,6 +618,18 @@ export default function Dashboard() {
                         </span>
                         <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
                           {option.description}
+                        </span>
+                        <span
+                          className={cn(
+                            'mt-2 block truncate text-[10px] font-medium',
+                            agentConfigurations[option.value]
+                              ? 'text-[hsl(var(--primary))]'
+                              : 'text-muted-foreground',
+                          )}
+                        >
+                          {agentConfigurations[option.value]
+                            ? `Агент: ${agentConfigurations[option.value]?.agentId}`
+                            : 'Агент ещё не создан'}
                         </span>
                       </button>
                     );

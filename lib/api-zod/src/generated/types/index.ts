@@ -6,19 +6,24 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './agentConfiguration';
 export * from './agentConfigurationInput';
 export * from './agentConfigurationInputSalesMode';
+export * from './agentConfigurationSalesMode';
 export * from './agentCreateInput';
 export * from './agentCreateInputSalesMode';
 export * from './agentCreateResult';
 export * from './agentStatus';
-export * from './agentStatusSalesMode';
 export * from './apiKeyInput';
 export * from './clientEventInput';
 export * from './clientEventInputLevel';
 export * from './errorResult';
+export * from './getSignedUrlParams';
+export * from './getSignedUrlSalesMode';
 export * from './healthStatus';
 export * from './logResult';
 export * from './saveKeyResult';
 export * from './settingsStatus';
 export * from './signedUrlResult';
+export * from './updateAgentConfigurationResult';
+export * from './updateAgentConfigurationResultSalesMode';

@@ -6,14 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-/**
- * Sales direction configured for the current agent
- * @nullable
- */
-export type AgentStatusSalesMode = typeof AgentStatusSalesMode[keyof typeof AgentStatusSalesMode] | null;
+export type AgentConfigurationSalesMode = typeof AgentConfigurationSalesMode[keyof typeof AgentConfigurationSalesMode];
 
 
-export const AgentStatusSalesMode = {
+export const AgentConfigurationSalesMode = {
   online_course: 'online_course',
   fitness_membership: 'fitness_membership',
   crm_system: 'crm_system',

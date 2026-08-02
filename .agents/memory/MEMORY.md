@@ -1,1 +1,2 @@
 - [Voice input compatibility](voice-input-compatibility.md) — для текущего ConvAI-потока рабочей оказалась нативная ScriptProcessor-схема; переход на Worklet нарушил распознавание.
+- [Sales mode agent routing](sales-mode-agent-routing.md) — каждое направление продаж имеет отдельный ElevenLabs agentId; signed URL всегда запрашивается с выбранным режимом.
