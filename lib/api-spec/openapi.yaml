@@ -77,6 +77,12 @@ paths:
       tags: [agent]
       summary: Create ElevenLabs AI sales agent
       description: Creates a new AI sales agent via ElevenLabs API using the saved key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentCreateInput"
       responses:
         "200":
           description: Agent created
@@ -193,6 +199,19 @@ components:
           type: string
         message:
           type: string
+
+    AgentCreateInput:
+      type: object
+      required: [salesMode]
+      properties:
+        salesMode:
+          type: string
+          enum: [online_course, fitness_membership, crm_system]
+          description: Sales direction used to configure the agent
+        serviceDescription:
+          type: string
+          maxLength: 50000
+          description: Optional text extracted from the uploaded service brief
 
     AgentStatus:
       type: object

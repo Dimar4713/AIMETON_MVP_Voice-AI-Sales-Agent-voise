@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AgentCreateInput,
   AgentCreateResult,
   AgentStatus,
   ApiKeyInput,
@@ -299,14 +300,14 @@ export const getCreateAgentUrl = () => {
  * Creates a new AI sales agent via ElevenLabs API using the saved key
  * @summary Create ElevenLabs AI sales agent
  */
-export const createAgent = async ( options?: Parameters<typeof customFetch>[1]): Promise<AgentCreateResult> => {
+export const createAgent = async (agentCreateInput: AgentCreateInput, options?: Parameters<typeof customFetch>[1]): Promise<AgentCreateResult> => {
 
   return customFetch<AgentCreateResult>(getCreateAgentUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentCreateInput)
   }
 );}
 
@@ -315,8 +316,8 @@ export const createAgent = async ( options?: Parameters<typeof customFetch>[1]):
 
 
 export const getCreateAgentMutationOptions = <TError = ErrorType<ErrorResult>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,{data: BodyType<AgentCreateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,{data: BodyType<AgentCreateInput>}, TContext> => {
 
 const mutationKey = ['createAgent'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -328,10 +329,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAgent>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAgent>>, {data: BodyType<AgentCreateInput>}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  createAgent(requestOptions)
+          return  createAgent(data,requestOptions)
         }
 
 
@@ -342,18 +343,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateAgentMutationResult = NonNullable<Awaited<ReturnType<typeof createAgent>>>
-
+    export type CreateAgentMutationBody = BodyType<AgentCreateInput>
     export type CreateAgentMutationError = ErrorType<ErrorResult>
 
     /**
  * @summary Create ElevenLabs AI sales agent
  */
 export const useCreateAgent = <TError = ErrorType<ErrorResult>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAgent>>, TError,{data: BodyType<AgentCreateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createAgent>>,
         TError,
-        void,
+        {data: BodyType<AgentCreateInput>},
         TContext
       > => {
       return useMutation(getCreateAgentMutationOptions(options));

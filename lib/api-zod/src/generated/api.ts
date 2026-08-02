@@ -48,6 +48,15 @@ export const GetSettingsStatusResponse = zod.object({
  * Creates a new AI sales agent via ElevenLabs API using the saved key
  * @summary Create ElevenLabs AI sales agent
  */
+export const createAgentBodyServiceDescriptionMax = 50000;
+
+
+
+export const CreateAgentBody = zod.object({
+  "salesMode": zod.enum(['online_course', 'fitness_membership', 'crm_system']).describe('Sales direction used to configure the agent'),
+  "serviceDescription": zod.string().max(createAgentBodyServiceDescriptionMax).optional().describe('Optional text extracted from the uploaded service brief')
+})
+
 export const CreateAgentResponse = zod.object({
   "success": zod.boolean(),
   "agentId": zod.string(),

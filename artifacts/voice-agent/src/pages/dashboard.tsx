@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import {
+  AgentCreateInputSalesMode,
   useGetSettingsStatus,
   useGetAgentStatus,
   useCreateAgent,
@@ -24,9 +25,17 @@ import {
   Loader2,
   Sparkles,
   ShieldCheck,
+  Upload,
+  FileText,
+  GraduationCap,
+  Dumbbell,
+  BriefcaseBusiness,
+  X,
+  type LucideIcon,
 } from 'lucide-react';
 import { MicLevelBar, MicTestPanel } from '@/components/mic-level';
 import { cn } from '@/lib/utils';
+import type { AgentCreateInputSalesMode as SalesMode } from '@workspace/api-client-react';
 
 const callStatusMeta: Record<
   CallStatus,
@@ -39,6 +48,36 @@ const callStatusMeta: Record<
   ending: { label: 'Завершение...', tone: 'warn' },
 };
 
+const salesModeOptions: Array<{
+  value: SalesMode;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}> = [
+  {
+    value: AgentCreateInputSalesMode.online_course,
+    title: 'Онлайн-курс',
+    description: 'Обучение и развитие навыков',
+    icon: GraduationCap,
+  },
+  {
+    value: AgentCreateInputSalesMode.fitness_membership,
+    title: 'Фитнес-абонемент',
+    description: 'Тренировки и физическая форма',
+    icon: Dumbbell,
+  },
+  {
+    value: AgentCreateInputSalesMode.crm_system,
+    title: 'CRM-система',
+    description: 'Продажи и управление клиентами',
+    icon: BriefcaseBusiness,
+  },
+];
+
+const salesModeLabels = Object.fromEntries(
+  salesModeOptions.map((option) => [option.value, option]),
+) as Record<SalesMode, (typeof salesModeOptions)[number]>;
+
 export default function Dashboard() {
   const appState = useAppState();
   const { keyStatus, setKeyStatus, agentStatus, setAgentStatus, callStatus, setCallStatus, logs, addLog, micLevel } =
@@ -46,6 +85,12 @@ export default function Dashboard() {
   const { startCall, endCall } = useConversation(appState);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [salesMode, setSalesMode] = useState<SalesMode>(
+    AgentCreateInputSalesMode.crm_system,
+  );
+  const [serviceDescription, setServiceDescription] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const settingsStatusQuery = useGetSettingsStatus();
   const agentStatusQuery = useGetAgentStatus();
@@ -114,8 +159,71 @@ export default function Dashboard() {
 
   const handleCreateAgent = () => {
     if (!keyStatus.keySaved || createAgent.isPending) return;
-    addLog('info', 'Создаём AI-агента продаж...');
-    createAgent.mutate();
+    addLog(
+      'info',
+      `Создаём AI-агента продаж: ${salesModeLabels[salesMode].title}...`,
+    );
+    createAgent.mutate({
+      data: {
+        salesMode,
+        ...(serviceDescription.trim()
+          ? { serviceDescription: serviceDescription.trim() }
+          : {}),
+      },
+    });
+  };
+
+  const handleServiceFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    setFileError(null);
+
+    if (!file) return;
+
+    const supportedExtensions = [
+      '.txt',
+      '.md',
+      '.csv',
+      '.json',
+      '.html',
+      '.htm',
+    ];
+    const extension = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`;
+    if (!supportedExtensions.includes(extension)) {
+      setFileError(
+        'Поддерживаются текстовые файлы: TXT, MD, CSV, JSON и HTML.',
+      );
+      return;
+    }
+
+    if (file.size > 200_000) {
+      setFileError('Файл слишком большой. Максимальный размер — 200 КБ.');
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      if (!text.trim()) {
+        setFileError('Файл пустой. Загрузите описание услуги с текстом.');
+        return;
+      }
+      if (text.length > 50_000) {
+        setFileError(
+          'Описание слишком длинное. Сократите файл до 50 000 символов.',
+        );
+        return;
+      }
+      setServiceDescription(text);
+      setUploadedFileName(file.name);
+    } catch {
+      setFileError('Не удалось прочитать файл. Попробуйте другой текстовый файл.');
+    }
+  };
+
+  const clearServiceFile = () => {
+    setServiceDescription('');
+    setUploadedFileName(null);
+    setFileError(null);
   };
 
   const callMeta = callStatusMeta[callStatus];
@@ -275,6 +383,122 @@ export default function Dashboard() {
 
               <Separator className="my-5" />
 
+              <div className="mb-5 rounded-xl border border-card-border bg-background/35 p-4 sm:p-5">
+                <div className="mb-4">
+                  <p className="text-sm font-semibold">Направление продаж</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Выберите, что агент будет продавать. Настройка применяется при
+                    создании нового агента.
+                  </p>
+                </div>
+
+                <div className="grid gap-2.5 sm:grid-cols-3">
+                  {salesModeOptions.map((option) => {
+                    const Icon = option.icon;
+                    const selected = salesMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setSalesMode(option.value)}
+                        className={cn(
+                          'rounded-lg border px-3 py-3 text-left transition-colors',
+                          selected
+                            ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                            : 'border-card-border bg-secondary/30 text-muted-foreground hover:border-primary/50 hover:text-foreground',
+                        )}
+                        aria-pressed={selected}
+                        data-testid={`sales-mode-${option.value}`}
+                      >
+                        <Icon
+                          className={cn(
+                            'mb-2 h-4 w-4',
+                            selected
+                              ? 'text-[hsl(var(--primary))]'
+                              : 'text-muted-foreground',
+                          )}
+                        />
+                        <span className="block text-xs font-semibold leading-snug">
+                          {option.title}
+                        </span>
+                        <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">
+                        Описание услуги для агента
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Загрузите файл с ценами, условиями, программой и ответами на
+                        частые вопросы.
+                      </p>
+                    </div>
+                    <label
+                      htmlFor="service-description-file"
+                      className={cn(
+                        'inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-md border border-card-border bg-secondary/50 px-3 py-2 text-xs font-medium transition-colors hover:border-primary/50 hover:bg-secondary',
+                        createAgent.isPending &&
+                          'pointer-events-none opacity-50',
+                      )}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      Загрузить файл
+                      <input
+                        id="service-description-file"
+                        type="file"
+                        accept=".txt,.md,.csv,.json,.html,.htm,text/plain,text/markdown,text/csv,application/json,text/html"
+                        className="sr-only"
+                        onChange={handleServiceFile}
+                        disabled={createAgent.isPending}
+                      />
+                    </label>
+                  </div>
+
+                  {uploadedFileName ? (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileText className="h-4 w-4 shrink-0 text-[hsl(var(--primary))]" />
+                        <span className="truncate text-xs font-medium">
+                          {uploadedFileName}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                          {serviceDescription.length.toLocaleString('ru-RU')} симв.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearServiceFile}
+                        className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                        aria-label="Удалить описание услуги"
+                        data-testid="button-remove-service-file"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="service-description-file"
+                      className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-card-border px-4 py-4 text-center text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                    >
+                      Можно загрузить TXT, MD, CSV, JSON или HTML до 200 КБ
+                    </label>
+                  )}
+
+                  {fileError && (
+                    <p className="mt-2 text-xs text-destructive" role="alert">
+                      {fileError}
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <Button
                 variant="secondary"
                 size="lg"
@@ -288,7 +512,7 @@ export default function Dashboard() {
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                Создать AI-агента
+                Создать AI-агента для выбранного направления
               </Button>
             </div>
 

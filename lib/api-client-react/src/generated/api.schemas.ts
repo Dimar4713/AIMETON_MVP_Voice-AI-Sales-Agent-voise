@@ -37,6 +37,28 @@ export interface AgentCreateResult {
   message?: string;
 }
 
+/**
+ * Sales direction used to configure the agent
+ */
+export type AgentCreateInputSalesMode = typeof AgentCreateInputSalesMode[keyof typeof AgentCreateInputSalesMode];
+
+
+export const AgentCreateInputSalesMode = {
+  online_course: 'online_course',
+  fitness_membership: 'fitness_membership',
+  crm_system: 'crm_system',
+} as const;
+
+export interface AgentCreateInput {
+  /** Sales direction used to configure the agent */
+  salesMode: AgentCreateInputSalesMode;
+  /**
+     * Optional text extracted from the uploaded service brief
+     * @maxLength 50000
+     */
+  serviceDescription?: string;
+}
+
 export interface AgentStatus {
   hasAgent: boolean;
   /** @nullable */

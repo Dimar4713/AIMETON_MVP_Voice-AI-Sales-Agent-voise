@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './agentCreateInput';
+export * from './agentCreateInputSalesMode';
 export * from './agentCreateResult';
 export * from './agentStatus';
 export * from './apiKeyInput';

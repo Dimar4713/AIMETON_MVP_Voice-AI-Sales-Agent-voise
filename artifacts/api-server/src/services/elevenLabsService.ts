@@ -1,5 +1,5 @@
 import { logger } from "../lib/logger";
-import { buildSystemPrompt, demoProduct } from "./productConfig";
+import { buildSystemPrompt, getProductConfig, type SalesMode } from "./productConfig";
 
 const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
 
@@ -43,19 +43,24 @@ async function elevenLabsRequest<T>(
   return response.json() as Promise<T>;
 }
 
-export async function createSalesAgent(apiKey: string): Promise<string> {
+export async function createSalesAgent(
+  apiKey: string,
+  salesMode: SalesMode = "crm_system",
+  serviceDescription?: string,
+): Promise<string> {
   logger.info("Creating ElevenLabs sales agent");
 
-  const systemPrompt = buildSystemPrompt(demoProduct);
+  const product = getProductConfig(salesMode);
+  const systemPrompt = buildSystemPrompt(product, serviceDescription);
 
   const payload = {
-    name: "AI Sales Agent",
+    name: `AI Sales Agent — ${product.name}`,
     conversation_config: {
       agent: {
         prompt: {
           prompt: systemPrompt,
         },
-        first_message: `Добрый день! Меня зовут Алекс, я AI-ассистент компании. Удобно ли вам сейчас поговорить пару минут? Я хотел бы узнать, как вы сейчас управляете своими клиентами и продажами.`,
+        first_message: `Добрый день! Меня зовут Алекс, я AI-ассистент компании. Удобно ли вам сейчас поговорить пару минут? Я хотел бы узнать, ${salesMode === "online_course" ? "какие навыки вы хотите развить" : salesMode === "fitness_membership" ? "каких результатов в тренировках вы хотите достичь" : "как вы сейчас управляете своими клиентами и продажами"}.`,
         language: "ru",
       },
       tts: {

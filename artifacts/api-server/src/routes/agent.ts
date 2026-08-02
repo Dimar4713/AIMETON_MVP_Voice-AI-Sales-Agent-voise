@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import {
+  CreateAgentBody,
   CreateAgentResponse,
   GetAgentStatusResponse,
 } from "@workspace/api-zod";
@@ -21,7 +22,12 @@ router.post("/agent/create", async (req, res): Promise<void> => {
 
   req.log.info("Starting ElevenLabs agent creation");
 
-  const agentId = await createSalesAgent(apiKey);
+  const input = CreateAgentBody.parse(req.body);
+  const agentId = await createSalesAgent(
+    apiKey,
+    input.salesMode,
+    input.serviceDescription,
+  );
 
   await saveAgentId(agentId);
 
